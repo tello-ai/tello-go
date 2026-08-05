@@ -114,7 +114,10 @@ func (c *Client) authenticate(ctx context.Context, conn *websocket.Conn, closed,
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	return &ConnectionClosedError{TelloError{Message: "timed out waiting for authentication"}}
+	// A missing auth.ok is an authentication failure, not a transport one: the
+	// gateway closes with 4401 on its own 10s deadline either way
+	// (docs/protocol/sdk-ws.v1.md section 2).
+	return &AuthenticationError{TelloError{Message: "timed out waiting for authentication"}}
 }
 
 func (c *Client) Close() error {

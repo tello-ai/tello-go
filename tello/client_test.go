@@ -189,9 +189,11 @@ func TestClientConnectFailsWhenAuthOKTimesOut(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Connect to fail on auth.ok timeout")
 	}
-	var closed *ConnectionClosedError
-	if !errors.As(err, &closed) {
-		t.Fatalf("expected ConnectionClosedError, got %T: %v", err, err)
+	// A missing auth.ok is an authentication failure, not a transport one — the
+	// gateway closes with 4401 on its own deadline either way.
+	var authErr *AuthenticationError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected AuthenticationError, got %T: %v", err, err)
 	}
 }
 
