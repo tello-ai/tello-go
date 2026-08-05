@@ -119,10 +119,27 @@ Gateway error frames map 1:1 to typed errors:
 | `dtmfDigitsInvalid` | `*ValidationError` |
 | `callAlreadyActive` | `*CallAlreadyActiveError` |
 | `noActiveCall` | `*NoActiveCallError` |
+| `callNotFound` | `*ValidationError` |
+| `callNotCompleted` | `*ValidationError` |
 | `callRejected` | `*CallRejectedError` (with `.Question`) |
-| `callNotFound` | `*TelloServerError` |
-| `callNotCompleted` | `*TelloServerError` |
 | `internalError` | `*TelloServerError` |
+
+Every error carries the gateway code on `.Code` — branch on that, never on
+`.Message`, which is display text the gateway may reword.
+
+`createCall` can also be refused before any call exists — no `call.created`, no
+`callId`, no charge. The gateway never retries these; any retry policy is yours.
+
+| gateway `code` | error | what to do |
+| --- | --- | --- |
+| `insufficientCredit` | `*CallRefusedError` | tell the user to top up; do not resend |
+| `concurrentLimitExceeded` | `*CallRefusedError` | wait for one of your own calls to end, then retry |
+| `callerNotVerified` | `*CallRefusedError` | tell the user to verify the number; do not resend |
+| `noRepresentativeNumber` | `*CallRefusedError` | tell the user to configure a caller number; do not resend |
+| `callProviderUnauthorized` | `*CallProviderError` | service fault; report it, resending never helps |
+| `callProviderDraining` | `*CallProviderError` | retry later at your own pace |
+| `callProviderUnavailable` | `*CallProviderError` | retry later at your own pace |
+| `callSetupFailed` | `*CallProviderError` | surface as a failure and report it |
 
 Command-level errors are also delivered to `EventTypeError` subscribers without
 closing the socket. `WaitClosed` returns the relevant error so a failed
@@ -162,3 +179,9 @@ They place real calls. Read [`examples/README.md`](examples/README.md) first.
 ## 8. Version compatibility
 
 `tello-go 0.1.x` implements Tello WS protocol `1.0` (`tello.ProtocolVersion`).
+
+The full frame contract is in [`docs/protocol/sdk-ws.v1.md`](docs/protocol/sdk-ws.v1.md),
+with [`docs/events/sdk-events.v1.schema.json`](docs/events/sdk-events.v1.schema.json)
+and [`docs/errors/errors.v1.json`](docs/errors/errors.v1.json). Those three files
+are generated copies of the canonical contract that lives beside the gateway
+implementation — read them here, edit them there.

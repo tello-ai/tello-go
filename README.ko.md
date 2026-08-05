@@ -126,10 +126,29 @@ client.GetSummary(ctx, callID, requestID string) error
 | `dtmfDigitsInvalid` | `*ValidationError` |
 | `callAlreadyActive` | `*CallAlreadyActiveError` |
 | `noActiveCall` | `*NoActiveCallError` |
+| `callNotFound` | `*ValidationError` |
+| `callNotCompleted` | `*ValidationError` |
 | `callRejected` | `*CallRejectedError` (`.Question` 포함) |
-| `callNotFound` | `*TelloServerError` |
-| `callNotCompleted` | `*TelloServerError` |
 | `internalError` | `*TelloServerError` |
+
+모든 오류는 게이트웨이 코드를 `.Code`에 담고 있습니다. **분기는 `.Code`로 하고
+`.Message`로는 하지 마세요.** 메시지는 게이트웨이가 다시 쓸 수 있는 표시용
+문자열입니다.
+
+`createCall`은 통화가 만들어지기 전에 거부될 수도 있습니다. 이 경우
+`call.created`도 `callId`도 과금도 없습니다. 게이트웨이는 재시도하지 않으므로
+재시도 정책은 호출자 몫입니다.
+
+| 게이트웨이 `code` | 오류 타입 | 대응 |
+| --- | --- | --- |
+| `insufficientCredit` | `*CallRefusedError` | 충전을 안내합니다. 재전송해도 소용없습니다 |
+| `concurrentLimitExceeded` | `*CallRefusedError` | 자기 통화가 하나 끝나기를 기다렸다가 재시도합니다 |
+| `callerNotVerified` | `*CallRefusedError` | 번호 인증을 안내합니다. 재전송해도 소용없습니다 |
+| `noRepresentativeNumber` | `*CallRefusedError` | 발신 번호 설정을 안내합니다. 재전송해도 소용없습니다 |
+| `callProviderUnauthorized` | `*CallProviderError` | 서비스 장애로 보고합니다. 재전송은 도움이 안 됩니다 |
+| `callProviderDraining` | `*CallProviderError` | 나중에 재시도합니다 |
+| `callProviderUnavailable` | `*CallProviderError` | 나중에 재시도합니다 |
+| `callSetupFailed` | `*CallProviderError` | 실패로 보고합니다 |
 
 명령 단위 오류는 소켓을 닫지 않고 `EventTypeError` 구독자에게도 전달됩니다.
 실패한 `CreateCall`(예: `toRequired`, `callRejected`)이 멈춘 채 남지 않도록,
@@ -172,3 +191,9 @@ go run ./examples/call-summary    # 게이트로 막아 둔 라이브 시나리�
 
 `tello-go 0.1.x`는 Tello WS 프로토콜 `1.0`을 구현합니다
 (`tello.ProtocolVersion`).
+
+프레임 계약 전문은 [`docs/protocol/sdk-ws.v1.md`](docs/protocol/sdk-ws.v1.md)에
+있고, [`docs/events/sdk-events.v1.schema.json`](docs/events/sdk-events.v1.schema.json)과
+[`docs/errors/errors.v1.json`](docs/errors/errors.v1.json)이 함께 있습니다. 이
+세 파일은 게이트웨이 구현 옆에 있는 정본에서 복사해 온 생성물입니다. 읽는 건
+여기서, 고치는 건 정본에서 합니다.
