@@ -6,14 +6,14 @@ Tello `/sdk` 프로토콜용 Go WebSocket SDK. SDK가 대화의 두뇌를 맡습
 게이트웨이는 진행 중인 통화에서 상대방이 말한 턴을 실시간으로 넘겨주고,
 핸들러가 만든 답변은 다시 통화로 전달됩니다.
 
-> 저장소: `tello-go` · 모듈: `github.com/tello-tft/tello-go` · 패키지: `tello`
+> 저장소: `tello-go` · 모듈: `github.com/tello-ai/tello-go` · 패키지: `tello`
 >
 > 전송 계층은 WebSocket뿐입니다. REST나 webhook은 제공하지 않습니다.
 
 ## 1. 설치
 
 ```bash
-go get github.com/tello-tft/tello-go
+go get github.com/tello-ai/tello-go
 ```
 
 Go 1.22 이상이 필요합니다. 런타임 의존성은 `github.com/gorilla/websocket`
@@ -41,7 +41,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/tello-tft/tello-go/tello"
+	"github.com/tello-ai/tello-go/tello"
 )
 
 func main() {

@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tello-tft/tello-go/tello"
+	"github.com/tello-ai/tello-go/tello"
 )
 
 // errTimeout marks a stage that never arrived, so the caller can attempt one

@@ -10,7 +10,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/tello-tft/tello-go/tello"
+	"github.com/tello-ai/tello-go/tello"
 )
 
 func main() {

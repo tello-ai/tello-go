@@ -24,7 +24,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/tello-tft/tello-go/tello"
+	"github.com/tello-ai/tello-go/tello"
 )
 
 // callTimeout bounds the demo so it cannot hang forever if the call never

@@ -6,14 +6,14 @@ Go WebSocket SDK for the Tello `/sdk` protocol. The SDK is the "conversation
 brain": the gateway streams each caller turn from a live phone call, and your
 handler's reply is forwarded back into the call.
 
-> repo: `tello-go` · module: `github.com/tello-tft/tello-go` · package: `tello`
+> repo: `tello-go` · module: `github.com/tello-ai/tello-go` · package: `tello`
 >
 > Transport is WebSocket only. There is no REST or webhook surface.
 
 ## 1. Install
 
 ```bash
-go get github.com/tello-tft/tello-go
+go get github.com/tello-ai/tello-go
 ```
 
 Requires Go 1.22+. The only runtime dependency is `github.com/gorilla/websocket`.
@@ -34,7 +34,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/tello-tft/tello-go/tello"
+	"github.com/tello-ai/tello-go/tello"
 )
 
 func main() {
