@@ -109,12 +109,22 @@ client.GetSummary(ctx, callID, requestID string) error
 선택 항목인 문자열 인자에는 `""`를 넘기면 됩니다. `requestID`는 명령과 응답
 프레임을 짝지어 주는 값이며, 멱등성 키가 아닙니다. `CreateCall`은 항상
 `requestId`를 보냅니다. 넘긴 값이 비어 있지 않으면 그 값을, 비어 있으면 생성한
-UUID를 씁니다.
+UUID를 씁니다. 명령마다 `requestID`를 따로 주고, `CreateCall`에 쓴 값을 다른
+명령에 다시 쓰지 마세요. `CreateCall`의 requestId를 되돌려 주는 오류는 대기를
+끝냅니다.
 
 `client.WaitClosed(ctx)`는 통화가 종료 상태(`call.completed` / `call.noAnswer` /
-`call.failed`, 또는 cancelled 상태)에 이르거나, 이 통화의 `CreateCall`에 대한
-오류가 오거나, 연결이 닫히면 반환합니다. 무한정 기다리지 않으려면
-`context.WithTimeout`으로 상한을 거세요.
+`call.failed`, 또는 status가 `cancelled`인 `call.statusChanged`)에 이르거나, 이
+통화의 `CreateCall`에 대한 오류가 오거나, 연결이 닫히면 반환합니다. 무한정
+기다리지 않으려면 `context.WithTimeout`으로 상한을 거세요.
+
+진행 중인 `WaitClosed`는 자기 통화가 끝나면 반환합니다. 그 통화의 종료 이벤트
+핸들러가 후속 통화를 시작해도 마찬가지입니다. 후속 통화를 기다리려면
+`WaitClosed`를 다시 호출하세요.
+
+`Cancel`에는 별도 응답이 없습니다. 게이트웨이가 취소를 반영하면 status가
+`cancelled`인 `call.statusChanged`(`PreviousStatus`는 취소 직전 상태)를 보내고,
+이 프레임이 그 통화의 종료 이벤트입니다.
 
 ## 6. 오류 처리
 
@@ -158,7 +168,30 @@ UUID를 씁니다.
 일치하는 오류)뿐입니다. 그래서 실패한 `CreateCall`(예: `toRequired`,
 `callRejected`)이 멈춘 채 남지 않습니다. `Answer`, `SendDtmf`, `GetSummary`,
 `Cancel`이 실패해도 통화는 끝나지 않으므로, 그 오류는 `EventTypeError` 이벤트로만
-전달되고 `WaitClosed`는 계속 기다립니다. `WaitClosed`가 반환하는 오류:
+전달되고 `WaitClosed`는 계속 기다립니다. 두 코드는 따로 다룹니다:
+
+- `callAlreadyActive`는 통화를 연 `CreateCall`에 대한 응답일 때만 대기를
+  끝냅니다. 게이트웨이는 직전 통화의 종료 이벤트를 보낸 뒤에도 잠시 그 통화를
+  정리하므로, 이 통화는 시작되지 않은 것입니다. 잠시 뒤 다시 시도하세요. 진행
+  중인 통화 도중 보낸 `CreateCall`에 대한 `callAlreadyActive`는 이벤트로만 오고,
+  진행 중인 통화는 계속됩니다.
+- `noActiveCall`은 대기를 끝내지 않습니다.
+
+`EventTypeError` 핸들러는 프레임을 `tello.Event`로 받습니다. 타입이 있는 오류로
+바꾸려면 `tello.ErrorFor`를 쓰세요:
+
+```go
+client.On(tello.EventTypeError, func(_ context.Context, event tello.Event) error {
+	err := tello.ErrorFor(event.Code, event.Message, event.Question)
+	var invalid *tello.ValidationError
+	if errors.As(err, &invalid) {
+		log.Printf("command %s rejected: %s", event.RequestID, invalid.Code)
+	}
+	return nil
+})
+```
+
+`WaitClosed`가 반환하는 오류:
 
 - 인증 실패(`unauthenticated` 프레임, 4401 종료, `auth.ok` 타임아웃) → `Connect`가 `*AuthenticationError` 반환
 - 통화 시작 거부, 또는 `call.created` 이후 통화 스트림 실패(`CreateCall`에 대한 오류로 옴) → 위 표의 대응 오류
@@ -195,7 +228,7 @@ go run ./examples/call-summary    # 게이트로 막아 둔 라이브 시나리�
 
 ## 8. 버전 호환성
 
-`tello-go 0.1.x`는 Tello WS 프로토콜 `1.0`을 구현합니다
+`tello-go 0.2.x`는 Tello WS 프로토콜 `1.0`을 구현합니다
 (`tello.ProtocolVersion`).
 
 프레임 계약 전문은 [`docs/protocol/sdk-ws.v1.md`](docs/protocol/sdk-ws.v1.md)에

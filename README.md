@@ -101,12 +101,22 @@ client.GetSummary(ctx, callID, requestID string) error
 
 Pass `""` for any optional string. `requestID` correlates a command with its
 response frame; it is not an idempotency key. `CreateCall` always sends a
-`requestId`: yours when non-empty, otherwise a generated UUID.
+`requestId`: yours when non-empty, otherwise a generated UUID. Give each
+command its own `requestID` and never reuse the `CreateCall` one on another
+command: an error echoing a `CreateCall` requestId ends the wait.
 
 `client.WaitClosed(ctx)` returns when the call reaches a terminal state
-(`call.completed` / `call.noAnswer` / `call.failed`, or a cancelled status),
-when an error answers this call's `CreateCall`, or when the connection closes.
-Bound it with `context.WithTimeout`.
+(`call.completed` / `call.noAnswer` / `call.failed`, or `call.statusChanged`
+with status `cancelled`), when an error answers this call's `CreateCall`, or
+when the connection closes. Bound it with `context.WithTimeout`.
+
+A `WaitClosed` in progress returns when its own call ends, even if a handler
+starts a follow-up call on that call's terminal event; call `WaitClosed` again
+to wait for the follow-up.
+
+`Cancel` has no reply of its own: once the gateway applies it, it sends
+`call.statusChanged` with status `cancelled` (and the real `PreviousStatus`),
+and that frame is the call's terminal event.
 
 ## 6. Error handling
 
@@ -148,8 +158,31 @@ closing the socket. Only an error that answers this call's `CreateCall` (its
 `requestId` matches) ends `WaitClosed`, so a failed `CreateCall` (e.g.
 `toRequired`, `callRejected`) does not hang. A failed `Answer`, `SendDtmf`,
 `GetSummary` or `Cancel` does not end the call, so its error is delivered only
-as an `EventTypeError` event and `WaitClosed` keeps waiting. `WaitClosed`
-returns:
+as an `EventTypeError` event and `WaitClosed` keeps waiting. Two codes are
+special:
+
+- `callAlreadyActive` ends the wait only when it answers the `CreateCall` that
+  opened the call. The gateway is still finishing the previous call for a
+  moment after its terminal event, so this call never started: retry shortly.
+  A `callAlreadyActive` answering a `CreateCall` sent during a live call is
+  only an event, and the live call continues.
+- `noActiveCall` never ends the wait.
+
+An `EventTypeError` handler receives the frame as a `tello.Event`; turn it
+into the typed error with `tello.ErrorFor`:
+
+```go
+client.On(tello.EventTypeError, func(_ context.Context, event tello.Event) error {
+	err := tello.ErrorFor(event.Code, event.Message, event.Question)
+	var invalid *tello.ValidationError
+	if errors.As(err, &invalid) {
+		log.Printf("command %s rejected: %s", event.RequestID, invalid.Code)
+	}
+	return nil
+})
+```
+
+`WaitClosed` returns:
 
 - auth failure (`unauthenticated` frame, close 4401, or `auth.ok` timeout) → `*AuthenticationError`, returned from `Connect`
 - a call-start rejection, or a failure of the call's stream after `call.created` (reported against `CreateCall`) → its mapped error above
@@ -184,7 +217,7 @@ They place real calls. Read [`examples/README.md`](examples/README.md) first.
 
 ## 8. Version compatibility
 
-`tello-go 0.1.x` implements Tello WS protocol `1.0` (`tello.ProtocolVersion`).
+`tello-go 0.2.x` implements Tello WS protocol `1.0` (`tello.ProtocolVersion`).
 
 The full frame contract is in [`docs/protocol/sdk-ws.v1.md`](docs/protocol/sdk-ws.v1.md),
 with [`docs/events/sdk-events.v1.schema.json`](docs/events/sdk-events.v1.schema.json)
