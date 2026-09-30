@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultURL = "ws://localhost:3000/sdk"
+	DefaultURL = "wss://api.telloai.io/sdk"
 	EnvAPIKey  = "TELLO_API_KEY"
 	EnvURL     = "TELLO_URL"
 )

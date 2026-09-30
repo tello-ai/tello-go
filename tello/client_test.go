@@ -44,6 +44,36 @@ func sendAuthOK(t *testing.T, conn *websocket.Conn) {
 	}
 }
 
+func TestNewClientResolvesURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     string
+		options []Option
+		want    string
+	}{
+		{name: "production gateway by default", want: "wss://api.telloai.io/sdk"},
+		{name: "TELLO_URL overrides the default", env: "ws://env.example/sdk", want: "ws://env.example/sdk"},
+		{
+			name:    "WithURL overrides TELLO_URL",
+			env:     "ws://env.example/sdk",
+			options: []Option{WithURL("ws://option.example/sdk")},
+			want:    "ws://option.example/sdk",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(EnvURL, tt.env)
+			client, err := NewClient("key-1", tt.options...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if client.config.URL != tt.want {
+				t.Fatalf("URL = %q, want %q", client.config.URL, tt.want)
+			}
+		})
+	}
+}
+
 func TestClientAuthenticatesFirstWithoutHeaderThenSendsCreateCall(t *testing.T) {
 	var gotAuth string
 	var authFrame map[string]any

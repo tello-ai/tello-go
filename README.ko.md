@@ -22,8 +22,8 @@ Go 1.22 이상이 필요합니다. 런타임 의존성은 `github.com/gorilla/we
 ## 2. API 키
 
 `NewClient("")`는 `TELLO_API_KEY`에서 키를 읽습니다. URL은 `TELLO_URL`을 먼저
-보고, 없으면 기본값 `ws://localhost:3000/sdk`를 씁니다. `WithURL`로 직접 지정할
-수도 있습니다.
+보고, 없으면 기본값인 운영 게이트웨이 `wss://api.telloai.io/sdk`를 씁니다.
+`WithURL`로 직접 지정할 수도 있습니다.
 
 키 인증은 `Connect`가 내부에서 끝냅니다. 소켓이 열리면 `auth` 프레임
 (`{"event":"auth","data":{"token":"<apiKey>"}}`)을 보내고, 서버가 `auth.ok`로

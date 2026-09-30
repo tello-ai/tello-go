@@ -45,7 +45,8 @@ set +a
 ## Shared configuration
 
 `basic-call` and `agent-callback` need only `TELLO_API_KEY` and `TELLO_URL`
-(the SDK reads both, and `TELLO_URL` defaults to `ws://localhost:3000/sdk`):
+(the SDK reads both; without `TELLO_URL` it connects to the production gateway
+`wss://api.telloai.io/sdk`). To run against a local gateway:
 
 ```sh
 TELLO_API_KEY=tello_live_xxx TELLO_URL=ws://localhost:3000/sdk \

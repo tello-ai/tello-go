@@ -45,8 +45,8 @@ set +a
 ## 공통 설정
 
 `basic-call`과 `agent-callback`은 `TELLO_API_KEY`와 `TELLO_URL`만 있으면
-됩니다. 둘 다 SDK가 직접 읽고, `TELLO_URL` 기본값은
-`ws://localhost:3000/sdk`입니다.
+됩니다. 둘 다 SDK가 직접 읽고, `TELLO_URL`이 없으면 운영 게이트웨이
+`wss://api.telloai.io/sdk`에 연결합니다. 로컬 게이트웨이로 실행하려면:
 
 ```sh
 TELLO_API_KEY=tello_live_xxx TELLO_URL=ws://localhost:3000/sdk \

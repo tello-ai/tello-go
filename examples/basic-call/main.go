@@ -21,7 +21,7 @@ func main() {
 
 func run(ctx context.Context) error {
 	// NewClient("") reads TELLO_API_KEY; the URL falls back to TELLO_URL and
-	// then to ws://localhost:3000/sdk. Use tello.WithURL to override it.
+	// then to wss://api.telloai.io/sdk. Use tello.WithURL to override it.
 	client, err := tello.NewClient("")
 	if err != nil {
 		return err

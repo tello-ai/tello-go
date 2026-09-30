@@ -20,8 +20,9 @@ Requires Go 1.22+. The only runtime dependency is `github.com/gorilla/websocket`
 
 ## 2. API key
 
-`NewClient("")` reads `TELLO_API_KEY`; `WithURL` overrides the default
-`ws://localhost:3000/sdk`, which itself falls back to `TELLO_URL`.
+`NewClient("")` reads `TELLO_API_KEY`. The URL comes from `WithURL` if given,
+otherwise from `TELLO_URL`, otherwise the production gateway
+`wss://api.telloai.io/sdk`.
 
 `Connect` authenticates the API key internally: after the socket opens it sends an `auth` frame (`{"event":"auth","data":{"token":"<apiKey>"}}`) and returns only once the server confirms with `auth.ok`. No `Authorization` header or query-string token is used, and the key never appears in logs or error messages. `Connect` returns an error if authentication fails, the server closes with code `4401`, or `auth.ok` does not arrive within `WithOpenTimeout`. No commands run before authentication completes.
 
