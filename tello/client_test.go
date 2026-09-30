@@ -310,7 +310,9 @@ func TestClientEmitsUserTurnsAndSurfacesCallRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = client.WaitClosed(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err = client.WaitClosed(ctx)
 	var rejected *CallRejectedError
 	if !errors.As(err, &rejected) {
 		t.Fatalf("expected CallRejectedError, got %T: %v", err, err)
@@ -376,22 +378,21 @@ func TestClientIgnoresStaleCloseFromPreviousConnection(t *testing.T) {
 			return
 		}
 		readAuth(t, conn)
-		sendAuthOK(t, conn)
 		select {
 		case firstReady <- conn:
+			sendAuthOK(t, conn)
 			return
 		default:
 		}
+		defer conn.Close()
+		// Drop the first connection while the second one is in use, then
+		// finish the second connection's call only after it was created.
 		first := <-firstReady
 		_ = first.Close()
-		time.Sleep(20 * time.Millisecond)
-		_ = conn.WriteJSON(map[string]any{
-			"type":      "call.completed",
-			"version":   "1.0",
-			"callId":    "c1",
-			"status":    "completed",
-			"timestamp": "t",
-		})
+		sendAuthOK(t, conn)
+		readCommand(t, conn, "createCall")
+		sendEvent(t, conn, "call.completed")
+		drain(conn)
 	}))
 	defer server.Close()
 
@@ -405,11 +406,14 @@ func TestClientIgnoresStaleCloseFromPreviousConnection(t *testing.T) {
 	if err := client.Connect(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	defer client.Close()
 	if err := client.CreateCall(context.Background(), "+821012345678", "", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := client.WaitClosed(context.Background()); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := client.WaitClosed(ctx); err != nil {
 		t.Fatalf("expected second call completion, got %T: %v", err, err)
 	}
 }
@@ -424,8 +428,7 @@ func TestClientReturnsTypedErrorForCommandAfterClose(t *testing.T) {
 		}
 		readAuth(t, conn)
 		sendAuthOK(t, conn)
-		// Give the client a moment to observe auth.ok before closing.
-		time.Sleep(20 * time.Millisecond)
+		// The client reads auth.ok before it can observe this close.
 		_ = conn.Close()
 	}))
 	defer server.Close()
@@ -437,7 +440,9 @@ func TestClientReturnsTypedErrorForCommandAfterClose(t *testing.T) {
 	if err := client.Connect(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.WaitClosed(context.Background()); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := client.WaitClosed(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -517,7 +522,7 @@ func readCommand(t *testing.T, conn *websocket.Conn, event string) string {
 	return requestID
 }
 
-// sendError writes a gateway error frame whose message is its code. An empty
+// errorFrame builds a gateway error frame whose message is its code. An empty
 // requestID omits the field.
 func sendError(t *testing.T, conn *websocket.Conn, code, requestID string) {
 	t.Helper()
@@ -630,23 +635,31 @@ func TestClientWaitClosedReturnsCreateCallErrors(t *testing.T) {
 		name        string
 		callCreated bool
 		code        string
-		check       func(error) bool
+		// codeOf returns the Code of the expected error type, or "" when err
+		// is not of that type.
+		codeOf func(error) string
 	}{
 		{
 			name: "refusal before call.created",
 			code: "insufficientCredit",
-			check: func(err error) bool {
+			codeOf: func(err error) string {
 				var target *CallRefusedError
-				return errors.As(err, &target)
+				if !errors.As(err, &target) {
+					return ""
+				}
+				return target.Code
 			},
 		},
 		{
 			name:        "stream failure after call.created",
 			callCreated: true,
 			code:        "internalError",
-			check: func(err error) bool {
+			codeOf: func(err error) string {
 				var target *TelloServerError
-				return errors.As(err, &target)
+				if !errors.As(err, &target) {
+					return ""
+				}
+				return target.Code
 			},
 		},
 	}
@@ -686,7 +699,7 @@ func TestClientWaitClosedReturnsCreateCallErrors(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			err = client.WaitClosed(ctx)
-			if !tt.check(err) || err.Error() != tt.code {
+			if tt.codeOf(err) != tt.code {
 				t.Fatalf("expected %s to end the wait with its mapped error, got %T: %v", tt.code, err, err)
 			}
 		})
