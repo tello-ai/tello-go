@@ -524,27 +524,35 @@ func readCommand(t *testing.T, conn *websocket.Conn, event string) string {
 
 // errorFrame builds a gateway error frame whose message is its code. An empty
 // requestID omits the field.
-func sendError(t *testing.T, conn *websocket.Conn, code, requestID string) {
-	t.Helper()
+func errorFrame(code, requestID string) map[string]any {
 	frame := map[string]any{"type": "error", "version": "1.0", "code": code, "message": code}
 	if requestID != "" {
 		frame["requestId"] = requestID
 	}
-	if err := conn.WriteJSON(frame); err != nil {
-		t.Errorf("writing %s error: %v", code, err)
-	}
+	return frame
 }
 
-func sendEvent(t *testing.T, conn *websocket.Conn, eventType string) {
-	t.Helper()
-	if err := conn.WriteJSON(map[string]any{
+func eventFrame(eventType string) map[string]any {
+	return map[string]any{
 		"type":      eventType,
 		"version":   "1.0",
 		"callId":    "c1",
 		"sessionId": "s1",
 		"status":    "completed",
 		"timestamp": "t",
-	}); err != nil {
+	}
+}
+
+func sendError(t *testing.T, conn *websocket.Conn, code, requestID string) {
+	t.Helper()
+	if err := conn.WriteJSON(errorFrame(code, requestID)); err != nil {
+		t.Errorf("writing %s error: %v", code, err)
+	}
+}
+
+func sendEvent(t *testing.T, conn *websocket.Conn, eventType string) {
+	t.Helper()
+	if err := conn.WriteJSON(eventFrame(eventType)); err != nil {
 		t.Errorf("writing %s: %v", eventType, err)
 	}
 }
@@ -754,6 +762,320 @@ func TestClientCreateCallAlwaysSendsRequestID(t *testing.T) {
 				}
 			case <-time.After(time.Second):
 				t.Fatal("timed out waiting for createCall frame")
+			}
+		})
+	}
+}
+
+// fakeGateway is a scripted /sdk gateway. It authenticates each connection
+// and hands it to the test, which reads the client's commands and writes the
+// frames a scenario needs, in order. Like the real gateway it answers cancel
+// with call.statusChanged status cancelled, the call's terminal (sdk-ws.v1
+// section 4.4).
+type fakeGateway struct {
+	url   string
+	conns chan *gatewayConn
+}
+
+type gatewayConn struct {
+	conn     *websocket.Conn
+	writeMu  sync.Mutex
+	commands chan map[string]any
+}
+
+func newFakeGateway(t *testing.T) *fakeGateway {
+	t.Helper()
+	gw := &fakeGateway{conns: make(chan *gatewayConn, 4)}
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		readAuth(t, conn)
+		gc := &gatewayConn{conn: conn, commands: make(chan map[string]any, 16)}
+		if err := gc.write(map[string]any{"type": "auth.ok", "version": "1.0", "accountId": "acc-1"}); err != nil {
+			return
+		}
+		gw.conns <- gc
+		for {
+			var frame map[string]any
+			if err := conn.ReadJSON(&frame); err != nil {
+				return
+			}
+			if frame["event"] == "cancel" {
+				_ = gc.write(map[string]any{
+					"type":           "call.statusChanged",
+					"version":        "1.0",
+					"callId":         "c1",
+					"status":         "cancelled",
+					"previousStatus": "inProgress",
+					"timestamp":      "t",
+				})
+				continue
+			}
+			gc.commands <- frame
+		}
+	}))
+	t.Cleanup(server.Close)
+	gw.url = "ws" + server.URL[len("http"):] + "/sdk"
+	return gw
+}
+
+// newClient returns a client for this gateway that is closed when the test
+// ends.
+func (gw *fakeGateway) newClient(t *testing.T) *Client {
+	t.Helper()
+	client, err := NewClient("key-1", WithURL(gw.url))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
+// connect connects client and returns the gateway side of that connection.
+func (gw *fakeGateway) connect(t *testing.T, client *Client) *gatewayConn {
+	t.Helper()
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case gc := <-gw.conns:
+		return gc
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the gateway connection")
+		return nil
+	}
+}
+
+func (gc *gatewayConn) write(frame map[string]any) error {
+	gc.writeMu.Lock()
+	defer gc.writeMu.Unlock()
+	return gc.conn.WriteJSON(frame)
+}
+
+func (gc *gatewayConn) send(t *testing.T, frame map[string]any) {
+	t.Helper()
+	if err := gc.write(frame); err != nil {
+		t.Fatalf("gateway writing %v: %v", frame["type"], err)
+	}
+}
+
+// next reads the client's next command, fails the test unless it is event,
+// and returns its requestId.
+func (gc *gatewayConn) next(t *testing.T, event string) string {
+	t.Helper()
+	select {
+	case frame := <-gc.commands:
+		if frame["event"] != event {
+			t.Fatalf("expected %s command, got %v", event, frame["event"])
+		}
+		data, _ := frame["data"].(map[string]any)
+		requestID, _ := data["requestId"].(string)
+		return requestID
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s command", event)
+		return ""
+	}
+}
+
+// drop closes the socket without a close frame, like a network failure.
+func (gc *gatewayConn) drop() {
+	_ = gc.conn.Close()
+}
+
+// waitCtx closes entered the first time WaitClosed selects on it. WaitClosed
+// attaches to the current call before it selects, so once entered is closed
+// the wait belongs to the call that was current at that point.
+type waitCtx struct {
+	context.Context
+	once    sync.Once
+	entered chan struct{}
+}
+
+func (w *waitCtx) Done() <-chan struct{} {
+	w.once.Do(func() { close(w.entered) })
+	return w.Context.Done()
+}
+
+// startWait runs WaitClosed in the background, bounded at two seconds, and
+// returns once the wait is attached to the current call.
+func startWait(t *testing.T, client *Client) <-chan error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+	wctx := &waitCtx{Context: ctx, entered: make(chan struct{})}
+	result := make(chan error, 1)
+	go func() { result <- client.WaitClosed(wctx) }()
+	select {
+	case <-wctx.entered:
+	case <-ctx.Done():
+		t.Fatal("WaitClosed never started waiting")
+	}
+	return result
+}
+
+func createCall(t *testing.T, client *Client, requestID string) {
+	t.Helper()
+	if err := client.CreateCall(context.Background(), "+821012345678", "", nil, requestID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientWaitClosedEndsOnCallAlreadyActiveForOpeningCreateCall(t *testing.T) {
+	gw := newFakeGateway(t)
+	client := gw.newClient(t)
+	gc := gw.connect(t, client)
+
+	createCall(t, client, "r-a")
+	gc.next(t, "createCall")
+	w1 := startWait(t, client)
+	// The gateway still holds the previous call during its cleanup window
+	// (sdk-ws.v1 section 4.1): this call never starts, no call.created.
+	gc.send(t, errorFrame("callAlreadyActive", "r-a"))
+	var active *CallAlreadyActiveError
+	if err := <-w1; !errors.As(err, &active) || active.Code != "callAlreadyActive" {
+		t.Fatalf("expected the refused opening createCall to end the wait with CallAlreadyActiveError, got %T: %v", err, err)
+	}
+
+	createCall(t, client, "r-b")
+	gc.next(t, "createCall")
+	w2 := startWait(t, client)
+	gc.send(t, eventFrame("call.completed"))
+	if err := <-w2; err != nil {
+		t.Fatalf("expected the retried call's completion to end the wait cleanly, got %T: %v", err, err)
+	}
+}
+
+func TestClientWaitClosedSurvivesCreateCallRefusedDuringLiveCall(t *testing.T) {
+	gw := newFakeGateway(t)
+	client := gw.newClient(t)
+	gc := gw.connect(t, client)
+
+	createCall(t, client, "r-a")
+	gc.next(t, "createCall")
+	gc.send(t, eventFrame("call.created"))
+	w1 := startWait(t, client)
+
+	createCall(t, client, "r-b")
+	gc.next(t, "createCall")
+	// Refusing a createCall sent during a live call leaves that call running.
+	gc.send(t, errorFrame("callAlreadyActive", "r-b"))
+	gc.send(t, errorFrame("internalError", "r-a"))
+	var server *TelloServerError
+	if err := <-w1; !errors.As(err, &server) || server.Code != "internalError" {
+		t.Fatalf("expected the live call's stream failure to end the wait, got %T: %v", err, err)
+	}
+}
+
+func TestClientWaitClosedReturnsWhenTerminalHandlerStartsFollowUpCall(t *testing.T) {
+	gw := newFakeGateway(t)
+	client := gw.newClient(t)
+	client.On(EventTypeCallCompleted, func(ctx context.Context, _ Event) error {
+		return client.CreateCall(ctx, "+821012345678", "", nil, "r-b")
+	})
+	gc := gw.connect(t, client)
+
+	createCall(t, client, "r-a")
+	gc.next(t, "createCall")
+	gc.send(t, eventFrame("call.created"))
+	w1 := startWait(t, client)
+	gc.send(t, eventFrame("call.completed"))
+	if err := <-w1; err != nil {
+		t.Fatalf("expected the first call's completion to end its wait, got %T: %v", err, err)
+	}
+
+	if got := gc.next(t, "createCall"); got != "r-b" {
+		t.Fatalf("expected the handler's follow-up createCall, got requestId %q", got)
+	}
+	w2 := startWait(t, client)
+	gc.send(t, errorFrame("internalError", "r-a"))
+	if err := client.Cancel(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-w2; err != nil {
+		t.Fatalf("expected only the follow-up call's cancelled terminal to end its wait, got %T: %v", err, err)
+	}
+}
+
+func TestClientWaitClosedIgnoresErrorsForCallOfPreviousConnection(t *testing.T) {
+	gw := newFakeGateway(t)
+	client := gw.newClient(t)
+	gc := gw.connect(t, client)
+
+	createCall(t, client, "r-a")
+	gc.next(t, "createCall")
+	gc.send(t, eventFrame("call.created"))
+	w1 := startWait(t, client)
+	gc.drop()
+	var closed *ConnectionClosedError
+	if err := <-w1; !errors.As(err, &closed) {
+		t.Fatalf("expected the mid-call drop to end the wait with ConnectionClosedError, got %T: %v", err, err)
+	}
+
+	gc = gw.connect(t, client)
+	createCall(t, client, "r-c")
+	gc.next(t, "createCall")
+	w2 := startWait(t, client)
+	gc.send(t, errorFrame("internalError", "r-a"))
+	if err := client.Cancel(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-w2; err != nil {
+		t.Fatalf("expected only the new call's cancelled terminal to end its wait, got %T: %v", err, err)
+	}
+}
+
+func TestClientCreateCallSendFailureEndsTheCall(t *testing.T) {
+	tests := []struct {
+		name   string
+		client func(t *testing.T) *Client
+	}{
+		{
+			name: "never connected",
+			client: func(t *testing.T) *Client {
+				client, err := NewClient("key-1", WithURL("ws://127.0.0.1:1/sdk"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return client
+			},
+		},
+		{
+			name: "socket closed by the gateway",
+			client: func(t *testing.T) *Client {
+				gw := newFakeGateway(t)
+				client := gw.newClient(t)
+				disconnected := make(chan struct{})
+				client.On(EventTypeDisconnected, func(context.Context, Event) error {
+					close(disconnected)
+					return nil
+				})
+				gw.connect(t, client).drop()
+				select {
+				case <-disconnected:
+				case <-time.After(time.Second):
+					t.Fatal("timed out waiting for the client to see the close")
+				}
+				return client
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := tt.client(t)
+			var closed *ConnectionClosedError
+			if err := client.CreateCall(context.Background(), "+821012345678", "", nil, "r-a"); !errors.As(err, &closed) {
+				t.Fatalf("expected CreateCall to fail with ConnectionClosedError, got %T: %v", err, err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := client.WaitClosed(ctx); !errors.As(err, &closed) {
+				t.Fatalf("expected the wait to return the send failure, got %T: %v", err, err)
 			}
 		})
 	}

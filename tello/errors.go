@@ -33,6 +33,9 @@ type CallRefusedError struct{ TelloError }
 // two will not.
 type CallProviderError struct{ TelloError }
 
+// ErrorFor maps a gateway error code to its typed error. Use it to turn an
+// EventTypeError event into the error WaitClosed would return:
+// ErrorFor(event.Code, event.Message, event.Question).
 func ErrorFor(code, message, question string) error {
 	base := TelloError{Code: code, Message: message, Question: question}
 	switch code {

@@ -22,18 +22,34 @@ type Client struct {
 	conn          *websocket.Conn
 	mu            sync.Mutex
 	writeMu       sync.Mutex
-	callDone      chan struct{}
 	closed        chan struct{}
 	authDone      chan struct{}
 	closeErr      error
-	callErr       error
-	active        bool
 	authenticated bool
-	callGen       int
 	connGen       int
-	// callRequestIDs holds the requestIds of the createCall commands sent for
-	// the current call. Only an error echoing one of them ends WaitClosed.
-	callRequestIDs map[string]struct{}
+	// call is the generation WaitClosed attaches to: the live call while
+	// active, otherwise the last call of this connection (or an unstarted
+	// placeholder). Each CreateCall that finds no live call replaces it.
+	call   *callGeneration
+	active bool
+	// callRequestIDs holds the requestIds of the createCall commands sent
+	// during the current call; openingRequestID is the one that started it.
+	callRequestIDs   map[string]struct{}
+	openingRequestID string
+}
+
+// callGeneration is one call from the SDK's view. done closes when it ends,
+// after err records the outcome (nil for a terminal event).
+type callGeneration struct {
+	done chan struct{}
+	err  error
+	// surfaced is set once a WaitClosed has returned err, so a wait started
+	// after the call ended reports it only once.
+	surfaced bool
+}
+
+func newCallGeneration() *callGeneration {
+	return &callGeneration{done: make(chan struct{})}
 }
 
 func NewClient(apiKey string, options ...Option) (*Client, error) {
@@ -44,7 +60,7 @@ func NewClient(apiKey string, options ...Option) (*Client, error) {
 	return &Client{
 		EventEmitter: NewEventEmitter(),
 		config:       config,
-		callDone:     make(chan struct{}),
+		call:         newCallGeneration(),
 		closed:       make(chan struct{}),
 	}, nil
 }
@@ -58,14 +74,17 @@ func (c *Client) Connect(ctx context.Context) error {
 		return err
 	}
 	c.mu.Lock()
+	// A call still live on a replaced connection can no longer end there.
+	c.endCallLocked(&ConnectionClosedError{TelloError{Message: "connection replaced before call terminated"}})
 	c.conn = conn
 	c.connGen++
 	gen := c.connGen
-	c.callDone = make(chan struct{})
+	c.call = newCallGeneration()
+	c.callRequestIDs = nil
+	c.openingRequestID = ""
 	c.closed = make(chan struct{})
 	c.authDone = make(chan struct{})
 	c.closeErr = nil
-	c.callErr = nil
 	c.authenticated = false
 	closed := c.closed
 	authDone := c.authDone
@@ -135,20 +154,32 @@ func (c *Client) Close() error {
 	return conn.Close()
 }
 
-// WaitClosed blocks until the current call reaches a terminal event or the
-// connection closes, and returns the error that ended it. A gateway error
-// frame ends the wait only when it answers this call's CreateCall (its
-// requestId matches); errors of other commands (answer, sendDtmf, getSummary,
-// cancel) do not end the call per sdk-ws.v1 section 6 and are delivered only
-// to EventTypeError handlers.
+// WaitClosed blocks until the call reaches a terminal event or the connection
+// closes, and returns the error that ended it.
+//
+// A wait started during a call returns when that call ends, with its
+// outcome, even if an event handler starts a follow-up call meanwhile; a
+// wait started afterwards waits for the follow-up. A wait started when no
+// call is live returns the last call's outcome once (nil afterwards), or,
+// before any call on this connection, waits for the connection to close.
+//
+// A gateway error frame ends the call only when it answers one of the call's
+// CreateCall commands (its requestId matches) and is neither noActiveCall nor
+// a callAlreadyActive refusing a CreateCall sent during the live call. A
+// callAlreadyActive answering the CreateCall that started the call does end
+// it: the gateway was still finishing the previous call (sdk-ws.v1 section
+// 4.1). Errors of other commands (answer, sendDtmf, getSummary, cancel) do not
+// end the call per sdk-ws.v1 section 6 and are delivered only to
+// EventTypeError handlers.
 func (c *Client) WaitClosed(ctx context.Context) error {
 	c.mu.Lock()
-	callDone := c.callDone
+	call := c.call
+	live := c.active
 	closed := c.closed
 	c.mu.Unlock()
 
 	select {
-	case <-callDone:
+	case <-call.done:
 	case <-closed:
 	case <-ctx.Done():
 		return ctx.Err()
@@ -156,20 +187,33 @@ func (c *Client) WaitClosed(ctx context.Context) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if live {
+		// A live call always ends before its connection's closed channel
+		// closes, so call.err is final here.
+		call.surfaced = true
+		return call.err
+	}
 	if c.closeErr != nil {
 		return c.closeErr
 	}
-	if c.callErr != nil {
-		err := c.callErr
-		c.callErr = nil
-		return err
+	select {
+	case <-call.done:
+	default:
+		return nil
 	}
-	return nil
+	if call.surfaced {
+		return nil
+	}
+	call.surfaced = true
+	return call.err
 }
 
 // CreateCall starts a call. The frame always carries a requestId: requestID
 // when non-empty, otherwise a generated UUID, so the client can tell the
 // gateway's answer to this command apart from errors of other commands.
+//
+// Sent during a live call, CreateCall only records its requestId against that
+// call; the gateway refuses it with callAlreadyActive and the call continues.
 func (c *Client) CreateCall(ctx context.Context, to, prompt string, metadata map[string]any, requestID string) error {
 	if requestID == "" {
 		generated, err := newRequestID()
@@ -179,18 +223,27 @@ func (c *Client) CreateCall(ctx context.Context, to, prompt string, metadata map
 		requestID = generated
 	}
 	c.mu.Lock()
-	// A createCall sent during a live call is refused with callAlreadyActive
-	// and the live call continues, so its id joins the live call's set.
-	if !c.active {
-		c.callRequestIDs = make(map[string]struct{})
+	var opened *callGeneration
+	if c.active {
+		c.callRequestIDs[requestID] = struct{}{}
+	} else {
+		opened = newCallGeneration()
+		c.call = opened
+		c.callRequestIDs = map[string]struct{}{requestID: {}}
+		c.openingRequestID = requestID
+		c.active = true
 	}
-	c.callRequestIDs[requestID] = struct{}{}
-	c.callGen++
-	c.callDone = make(chan struct{})
-	c.callErr = nil
-	c.active = true
 	c.mu.Unlock()
-	return c.send(ctx, CreateCallFrame(to, prompt, metadata, requestID))
+
+	err := c.send(ctx, CreateCallFrame(to, prompt, metadata, requestID))
+	if err != nil && opened != nil {
+		c.mu.Lock()
+		if c.call == opened {
+			c.endCallLocked(err)
+		}
+		c.mu.Unlock()
+	}
+	return err
 }
 
 // newRequestID returns a random RFC 4122 version 4 UUID string.
@@ -252,52 +305,57 @@ func (c *Client) recvLoop(gen int, conn *websocket.Conn) {
 }
 
 func (c *Client) dispatch(gen int, frame map[string]any) {
+	event := ParseEvent(frame)
 	c.mu.Lock()
 	if gen != c.connGen {
 		c.mu.Unlock()
 		return
 	}
-	c.mu.Unlock()
-
-	event := ParseEvent(frame)
 	if event.Type == EventTypeAuthOK {
-		c.mu.Lock()
-		if gen == c.connGen {
-			c.authenticated = true
-			closeIfOpen(c.authDone)
-		}
+		c.authenticated = true
+		closeIfOpen(c.authDone)
 		c.mu.Unlock()
 		return
 	}
+	// The call ends before the event reaches handlers, so a handler that
+	// starts a follow-up call starts a new generation.
 	if event.Type == EventTypeError {
 		err := ErrorFor(event.Code, event.Message, event.Question)
-		c.mu.Lock()
-		_, forCreateCall := c.callRequestIDs[event.RequestID]
 		if event.Code == "unauthenticated" {
 			c.closeErr = err
 			closeIfOpen(c.authDone)
-		} else if c.active && forCreateCall && event.Code != "noActiveCall" && event.Code != "callAlreadyActive" {
-			// Only this call's createCall can fail it (sdk-ws.v1 section 6);
-			// every other error is emitted below and the wait continues.
-			c.callErr = err
-			c.active = false
-			closeIfOpen(c.callDone)
+		} else if c.endsCallLocked(event) {
+			c.endCallLocked(err)
 		}
-		c.mu.Unlock()
-		_ = c.Emit(context.Background(), EventTypeError, event)
-		return
+	} else if IsTerminal(event) {
+		c.endCallLocked(nil)
 	}
-
-	c.mu.Lock()
-	callGen := c.callGen
 	c.mu.Unlock()
 	_ = c.Emit(context.Background(), event.Type, event)
-	c.mu.Lock()
-	if IsTerminal(event) && c.callGen == callGen {
-		c.active = false
-		closeIfOpen(c.callDone)
+}
+
+// endsCallLocked reports whether error event ends the live call: only an
+// answer to one of its createCall commands does (sdk-ws.v1 section 6), and a
+// callAlreadyActive only when it refuses the createCall that started the call.
+func (c *Client) endsCallLocked(event Event) bool {
+	if !c.active || event.Code == "noActiveCall" {
+		return false
 	}
-	c.mu.Unlock()
+	if _, ok := c.callRequestIDs[event.RequestID]; !ok {
+		return false
+	}
+	return event.Code != "callAlreadyActive" || event.RequestID == c.openingRequestID
+}
+
+// endCallLocked ends the live call, if any, with outcome err and releases
+// every wait attached to it.
+func (c *Client) endCallLocked(err error) {
+	if !c.active {
+		return
+	}
+	c.active = false
+	c.call.err = err
+	close(c.call.done)
 }
 
 func (c *Client) noteClose(gen int, err error) {
@@ -329,10 +387,9 @@ func (c *Client) finish(gen int) {
 		c.mu.Unlock()
 		return
 	}
-	c.active = false
+	c.endCallLocked(c.closeErr)
 	c.conn = nil
 	closeIfOpen(c.closed)
-	closeIfOpen(c.callDone)
 	c.mu.Unlock()
 	_ = c.Emit(context.Background(), EventTypeDisconnected, Event{Type: EventTypeDisconnected, Raw: map[string]any{}})
 }
