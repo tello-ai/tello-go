@@ -2,7 +2,9 @@ package tello
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -29,6 +31,9 @@ type Client struct {
 	authenticated bool
 	callGen       int
 	connGen       int
+	// callRequestIDs holds the requestIds of the createCall commands sent for
+	// the current call. Only an error echoing one of them ends WaitClosed.
+	callRequestIDs map[string]struct{}
 }
 
 func NewClient(apiKey string, options ...Option) (*Client, error) {
@@ -130,6 +135,12 @@ func (c *Client) Close() error {
 	return conn.Close()
 }
 
+// WaitClosed blocks until the current call reaches a terminal event or the
+// connection closes, and returns the error that ended it. A gateway error
+// frame ends the wait only when it answers this call's CreateCall (its
+// requestId matches); errors of other commands (answer, sendDtmf, getSummary,
+// cancel) do not end the call per sdk-ws.v1 section 6 and are delivered only
+// to EventTypeError handlers.
 func (c *Client) WaitClosed(ctx context.Context) error {
 	c.mu.Lock()
 	callDone := c.callDone
@@ -156,14 +167,41 @@ func (c *Client) WaitClosed(ctx context.Context) error {
 	return nil
 }
 
+// CreateCall starts a call. The frame always carries a requestId: requestID
+// when non-empty, otherwise a generated UUID, so the client can tell the
+// gateway's answer to this command apart from errors of other commands.
 func (c *Client) CreateCall(ctx context.Context, to, prompt string, metadata map[string]any, requestID string) error {
+	if requestID == "" {
+		generated, err := newRequestID()
+		if err != nil {
+			return err
+		}
+		requestID = generated
+	}
 	c.mu.Lock()
+	// A createCall sent during a live call is refused with callAlreadyActive
+	// and the live call continues, so its id joins the live call's set.
+	if !c.active {
+		c.callRequestIDs = make(map[string]struct{})
+	}
+	c.callRequestIDs[requestID] = struct{}{}
 	c.callGen++
 	c.callDone = make(chan struct{})
 	c.callErr = nil
 	c.active = true
 	c.mu.Unlock()
 	return c.send(ctx, CreateCallFrame(to, prompt, metadata, requestID))
+}
+
+// newRequestID returns a random RFC 4122 version 4 UUID string.
+func newRequestID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate createCall requestId: %w", err)
+	}
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
 func (c *Client) Answer(ctx context.Context, text, messageID, requestID string) error {
@@ -234,10 +272,13 @@ func (c *Client) dispatch(gen int, frame map[string]any) {
 	if event.Type == EventTypeError {
 		err := ErrorFor(event.Code, event.Message, event.Question)
 		c.mu.Lock()
+		_, forCreateCall := c.callRequestIDs[event.RequestID]
 		if event.Code == "unauthenticated" {
 			c.closeErr = err
 			closeIfOpen(c.authDone)
-		} else if c.active && event.Code != "noActiveCall" && event.Code != "callAlreadyActive" {
+		} else if c.active && forCreateCall && event.Code != "noActiveCall" && event.Code != "callAlreadyActive" {
+			// Only this call's createCall can fail it (sdk-ws.v1 section 6);
+			// every other error is emitted below and the wait continues.
 			c.callErr = err
 			c.active = false
 			closeIfOpen(c.callDone)

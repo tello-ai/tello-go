@@ -273,11 +273,7 @@ func TestClientEmitsUserTurnsAndSurfacesCallRejection(t *testing.T) {
 		defer conn.Close()
 		readAuth(t, conn)
 		sendAuthOK(t, conn)
-		var ignored map[string]any
-		if err := conn.ReadJSON(&ignored); err != nil {
-			t.Error(err)
-			return
-		}
+		requestID := readCommand(t, conn, "createCall")
 		_ = conn.WriteJSON(map[string]any{
 			"type":      "user.turn",
 			"version":   "1.0",
@@ -287,11 +283,12 @@ func TestClientEmitsUserTurnsAndSurfacesCallRejection(t *testing.T) {
 			"timestamp": "t",
 		})
 		_ = conn.WriteJSON(map[string]any{
-			"type":     "error",
-			"version":  "1.0",
-			"code":     "callRejected",
-			"message":  "Call rejected",
-			"question": "why?",
+			"type":      "error",
+			"version":   "1.0",
+			"code":      "callRejected",
+			"message":   "Call rejected",
+			"question":  "why?",
+			"requestId": requestID,
 		})
 	}))
 	defer server.Close()
@@ -500,5 +497,251 @@ func TestClientSerializesConcurrentCommandWrites(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// readCommand reads the next command frame, fails the test unless it is the
+// expected event, and returns its requestId the way the gateway echoes it.
+func readCommand(t *testing.T, conn *websocket.Conn, event string) string {
+	t.Helper()
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Errorf("reading %s frame: %v", event, err)
+		return ""
+	}
+	if frame["event"] != event {
+		t.Errorf("expected %s frame, got %v", event, frame["event"])
+	}
+	data, _ := frame["data"].(map[string]any)
+	requestID, _ := data["requestId"].(string)
+	return requestID
+}
+
+// sendError writes a gateway error frame whose message is its code. An empty
+// requestID omits the field.
+func sendError(t *testing.T, conn *websocket.Conn, code, requestID string) {
+	t.Helper()
+	frame := map[string]any{"type": "error", "version": "1.0", "code": code, "message": code}
+	if requestID != "" {
+		frame["requestId"] = requestID
+	}
+	if err := conn.WriteJSON(frame); err != nil {
+		t.Errorf("writing %s error: %v", code, err)
+	}
+}
+
+func sendEvent(t *testing.T, conn *websocket.Conn, eventType string) {
+	t.Helper()
+	if err := conn.WriteJSON(map[string]any{
+		"type":      eventType,
+		"version":   "1.0",
+		"callId":    "c1",
+		"sessionId": "s1",
+		"status":    "completed",
+		"timestamp": "t",
+	}); err != nil {
+		t.Errorf("writing %s: %v", eventType, err)
+	}
+}
+
+// drain keeps reading until the client closes the socket.
+func drain(conn *websocket.Conn) {
+	for {
+		var ignored map[string]any
+		if err := conn.ReadJSON(&ignored); err != nil {
+			return
+		}
+	}
+}
+
+func TestClientWaitClosedIgnoresErrorsOfOtherCommands(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		readAuth(t, conn)
+		sendAuthOK(t, conn)
+		readCommand(t, conn, "createCall")
+		sendEvent(t, conn, "call.created")
+		// A failed sendDtmf does not end the call (sdk-ws.v1 section 6); the
+		// gateway echoes the sendDtmf requestId on its error.
+		sendError(t, conn, "dtmfDigitsInvalid", readCommand(t, conn, "sendDtmf"))
+		sendError(t, conn, "internalError", "")
+		<-release
+		sendEvent(t, conn, "call.completed")
+		drain(conn)
+	}))
+	defer server.Close()
+
+	client, err := NewClient("key-1", WithURL("ws"+server.URL[len("http"):]+"/sdk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	errorCodes := make(chan string, 2)
+	client.On(EventTypeError, func(_ context.Context, event Event) error {
+		errorCodes <- event.Code
+		return nil
+	})
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if err := client.CreateCall(context.Background(), "+821012345678", "", nil, "r-call"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SendDtmf(context.Background(), "12#x", "", "r-dtmf"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The client decides whether an error ends the wait before it emits the
+	// error, so once both reached the handler both have been judged.
+	for _, want := range []string{"dtmfDigitsInvalid", "internalError"} {
+		select {
+		case got := <-errorCodes:
+			if got != want {
+				t.Fatalf("expected %s delivered to error handlers, got %s", want, got)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %s on error handlers", want)
+		}
+	}
+
+	pending, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := client.WaitClosed(pending); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected WaitClosed to keep waiting while the call is live, got %T: %v", err, err)
+	}
+
+	close(release)
+	done, cancelDone := context.WithTimeout(context.Background(), time.Second)
+	defer cancelDone()
+	if err := client.WaitClosed(done); err != nil {
+		t.Fatalf("expected WaitClosed to end cleanly on call.completed, got %T: %v", err, err)
+	}
+}
+
+func TestClientWaitClosedReturnsCreateCallErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		callCreated bool
+		code        string
+		check       func(error) bool
+	}{
+		{
+			name: "refusal before call.created",
+			code: "insufficientCredit",
+			check: func(err error) bool {
+				var target *CallRefusedError
+				return errors.As(err, &target)
+			},
+		},
+		{
+			name:        "stream failure after call.created",
+			callCreated: true,
+			code:        "internalError",
+			check: func(err error) bool {
+				var target *TelloServerError
+				return errors.As(err, &target)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upgrader := websocket.Upgrader{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer conn.Close()
+				readAuth(t, conn)
+				sendAuthOK(t, conn)
+				requestID := readCommand(t, conn, "createCall")
+				if tt.callCreated {
+					sendEvent(t, conn, "call.created")
+				}
+				sendError(t, conn, tt.code, requestID)
+				drain(conn)
+			}))
+			defer server.Close()
+
+			client, err := NewClient("key-1", WithURL("ws"+server.URL[len("http"):]+"/sdk"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := client.Connect(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			if err := client.CreateCall(context.Background(), "+821012345678", "", nil, ""); err != nil {
+				t.Fatal(err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			err = client.WaitClosed(ctx)
+			if !tt.check(err) || err.Error() != tt.code {
+				t.Fatalf("expected %s to end the wait with its mapped error, got %T: %v", tt.code, err, err)
+			}
+		})
+	}
+}
+
+func TestClientCreateCallAlwaysSendsRequestID(t *testing.T) {
+	tests := []struct {
+		name      string
+		requestID string
+	}{
+		{name: "generated when omitted"},
+		{name: "caller value unchanged", requestID: "r-given"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upgrader := websocket.Upgrader{}
+			sent := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer conn.Close()
+				readAuth(t, conn)
+				sendAuthOK(t, conn)
+				sent <- readCommand(t, conn, "createCall")
+				drain(conn)
+			}))
+			defer server.Close()
+
+			client, err := NewClient("key-1", WithURL("ws"+server.URL[len("http"):]+"/sdk"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := client.Connect(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			if err := client.CreateCall(context.Background(), "+821012345678", "", nil, tt.requestID); err != nil {
+				t.Fatal(err)
+			}
+
+			select {
+			case got := <-sent:
+				if tt.requestID == "" && got == "" {
+					t.Fatal("expected a generated requestId on createCall, got none")
+				}
+				if tt.requestID != "" && got != tt.requestID {
+					t.Fatalf("expected requestId %q unchanged, got %q", tt.requestID, got)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for createCall frame")
+			}
+		})
 	}
 }

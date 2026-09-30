@@ -100,11 +100,13 @@ client.GetSummary(ctx, callID, requestID string) error
 ```
 
 Pass `""` for any optional string. `requestID` correlates a command with its
-response frame; it is not an idempotency key.
+response frame; it is not an idempotency key. `CreateCall` always sends a
+`requestId`: yours when non-empty, otherwise a generated UUID.
 
 `client.WaitClosed(ctx)` returns when the call reaches a terminal state
-(`call.completed` / `call.noAnswer` / `call.failed`, or a cancelled status) or
-the connection closes. Bound it with `context.WithTimeout`.
+(`call.completed` / `call.noAnswer` / `call.failed`, or a cancelled status),
+when an error answers this call's `CreateCall`, or when the connection closes.
+Bound it with `context.WithTimeout`.
 
 ## 6. Error handling
 
@@ -141,12 +143,16 @@ Every error carries the gateway code on `.Code` — branch on that, never on
 | `callProviderUnavailable` | `*CallProviderError` | retry later at your own pace |
 | `callSetupFailed` | `*CallProviderError` | surface as a failure and report it |
 
-Command-level errors are also delivered to `EventTypeError` subscribers without
-closing the socket. `WaitClosed` returns the relevant error so a failed
-`CreateCall` (e.g. `toRequired`, `callRejected`) does not hang:
+Command-level errors are delivered to `EventTypeError` subscribers without
+closing the socket. Only an error that answers this call's `CreateCall` (its
+`requestId` matches) ends `WaitClosed`, so a failed `CreateCall` (e.g.
+`toRequired`, `callRejected`) does not hang. A failed `Answer`, `SendDtmf`,
+`GetSummary` or `Cancel` does not end the call, so its error is delivered only
+as an `EventTypeError` event and `WaitClosed` keeps waiting. `WaitClosed`
+returns:
 
 - auth failure (`unauthenticated` frame, close 4401, or `auth.ok` timeout) → `*AuthenticationError`, returned from `Connect`
-- a call-start rejection → its mapped error above
+- a call-start rejection, or a failure of the call's stream after `call.created` (reported against `CreateCall`) → its mapped error above
 - the connection dropping mid-call → `*ConnectionClosedError`
 - the session being displaced (close 4429) → `*SessionReplacedError`
 

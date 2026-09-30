@@ -107,11 +107,14 @@ client.GetSummary(ctx, callID, requestID string) error
 ```
 
 선택 항목인 문자열 인자에는 `""`를 넘기면 됩니다. `requestID`는 명령과 응답
-프레임을 짝지어 주는 값이며, 멱등성 키가 아닙니다.
+프레임을 짝지어 주는 값이며, 멱등성 키가 아닙니다. `CreateCall`은 항상
+`requestId`를 보냅니다. 넘긴 값이 비어 있지 않으면 그 값을, 비어 있으면 생성한
+UUID를 씁니다.
 
 `client.WaitClosed(ctx)`는 통화가 종료 상태(`call.completed` / `call.noAnswer` /
-`call.failed`, 또는 cancelled 상태)에 이르거나 연결이 닫히면 반환합니다. 무한정
-기다리지 않으려면 `context.WithTimeout`으로 상한을 거세요.
+`call.failed`, 또는 cancelled 상태)에 이르거나, 이 통화의 `CreateCall`에 대한
+오류가 오거나, 연결이 닫히면 반환합니다. 무한정 기다리지 않으려면
+`context.WithTimeout`으로 상한을 거세요.
 
 ## 6. 오류 처리
 
@@ -150,12 +153,15 @@ client.GetSummary(ctx, callID, requestID string) error
 | `callProviderUnavailable` | `*CallProviderError` | 나중에 재시도합니다 |
 | `callSetupFailed` | `*CallProviderError` | 실패로 보고합니다 |
 
-명령 단위 오류는 소켓을 닫지 않고 `EventTypeError` 구독자에게도 전달됩니다.
-실패한 `CreateCall`(예: `toRequired`, `callRejected`)이 멈춘 채 남지 않도록,
-`WaitClosed`가 그 오류를 그대로 반환합니다:
+명령 단위 오류는 소켓을 닫지 않고 `EventTypeError` 구독자에게 전달됩니다.
+`WaitClosed`를 끝내는 오류는 이 통화의 `CreateCall`에 대한 응답(`requestId`가
+일치하는 오류)뿐입니다. 그래서 실패한 `CreateCall`(예: `toRequired`,
+`callRejected`)이 멈춘 채 남지 않습니다. `Answer`, `SendDtmf`, `GetSummary`,
+`Cancel`이 실패해도 통화는 끝나지 않으므로, 그 오류는 `EventTypeError` 이벤트로만
+전달되고 `WaitClosed`는 계속 기다립니다. `WaitClosed`가 반환하는 오류:
 
 - 인증 실패(`unauthenticated` 프레임, 4401 종료, `auth.ok` 타임아웃) → `Connect`가 `*AuthenticationError` 반환
-- 통화 시작 거부 → 위 표의 대응 오류
+- 통화 시작 거부, 또는 `call.created` 이후 통화 스트림 실패(`CreateCall`에 대한 오류로 옴) → 위 표의 대응 오류
 - 통화 도중 연결 끊김 → `*ConnectionClosedError`
 - 다른 연결에 세션을 빼앗김(4429 종료) → `*SessionReplacedError`
 
