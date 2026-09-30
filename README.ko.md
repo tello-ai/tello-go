@@ -13,7 +13,7 @@ Tello `/sdk` 프로토콜용 Go WebSocket SDK. SDK가 대화의 두뇌를 맡습
 ## 1. 설치
 
 ```bash
-go get github.com/tello-ai/tello-go
+go get github.com/tello-ai/tello-go/tello
 ```
 
 Go 1.22 이상이 필요합니다. 런타임 의존성은 `github.com/gorilla/websocket`

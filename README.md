@@ -13,7 +13,7 @@ handler's reply is forwarded back into the call.
 ## 1. Install
 
 ```bash
-go get github.com/tello-ai/tello-go
+go get github.com/tello-ai/tello-go/tello
 ```
 
 Requires Go 1.22+. The only runtime dependency is `github.com/gorilla/websocket`.
