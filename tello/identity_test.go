@@ -4,37 +4,41 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 func TestClientConnectSendsClientIdentityQuery(t *testing.T) {
+	ident := "sdk=go&version=" + Version + "&protocol=" + ProtocolVersion
 	cases := []struct {
-		name      string
-		suffix    string
-		wantPath  string
-		wantExtra map[string]string
+		name       string
+		suffix     string
+		wantTarget string
 	}{
-		{"no query", "/sdk", "/sdk", nil},
-		{"user query kept", "/sdk?region=kr&trace=1", "/sdk", map[string]string{"region": "kr", "trace": "1"}},
-		{"same keys overwritten", "/sdk?sdk=custom&version=9&protocol=0.1", "/sdk", nil},
-		{"nested path", "/edge/v2/sdk", "/edge/v2/sdk", nil},
+		{"no query", "/sdk", "/sdk?" + ident},
+		{"user query kept", "/sdk?region=kr&trace=1", "/sdk?region=kr&trace=1&" + ident},
+		{"raw pairs kept verbatim", "/sdk?token=a;b&x=%zz&z=1", "/sdk?token=a;b&x=%zz&z=1&" + ident},
+		{"order, encoding and bare flag kept", "/sdk?z=1&a=b%20c&flag&q=x+y", "/sdk?z=1&a=b%20c&flag&q=x+y&" + ident},
+		{"same keys removed", "/sdk?sdk=custom&version=9&keep=1&protocol=0.1", "/sdk?keep=1&" + ident},
+		{"encoded keys removed", "/sdk?%73dk=custom&ver%73ion=9&a=1", "/sdk?a=1&" + ident},
+		{"empty pieces dropped", "/sdk?&a=1&&", "/sdk?a=1&" + ident},
+		{"nested path", "/edge/v2/sdk", "/edge/v2/sdk?" + ident},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := make(chan *url.URL, 1)
+			got := make(chan string, 1)
 			upgrader := websocket.Upgrader{}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				got <- r.URL
+				got <- r.RequestURI
 				conn, err := upgrader.Upgrade(w, r, nil)
 				if err != nil {
 					return
 				}
 				defer conn.Close()
 				readAuth(t, conn)
-				_ = conn.WriteJSON(map[string]any{"type": "authenticated", "version": "1.0", "accountId": 1, "authMethod": "api_key"})
+				sendAuthOK(t, conn)
 				_, _, _ = conn.ReadMessage()
 			}))
 			defer server.Close()
@@ -43,25 +47,20 @@ func TestClientConnectSendsClientIdentityQuery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_ = client.Connect(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := client.Connect(ctx); err != nil {
+				t.Fatal(err)
+			}
 			defer client.Close()
 
-			u := <-got
-			if u.Path != tc.wantPath {
-				t.Fatalf("path = %q, want %q", u.Path, tc.wantPath)
-			}
-			q := u.Query()
-			want := map[string]string{"sdk": "go", "version": Version, "protocol": ProtocolVersion}
-			for k, v := range tc.wantExtra {
-				want[k] = v
-			}
-			for k, v := range want {
-				if vs := q[k]; len(vs) != 1 || vs[0] != v {
-					t.Errorf("query %s = %v, want [%s]", k, vs, v)
+			select {
+			case target := <-got:
+				if target != tc.wantTarget {
+					t.Fatalf("request target = %q, want %q", target, tc.wantTarget)
 				}
-			}
-			if len(q) != len(want) {
-				t.Errorf("query = %v, want only %v", q, want)
+			case <-time.After(2 * time.Second):
+				t.Fatal("server never received the upgrade request")
 			}
 		})
 	}
@@ -72,7 +71,7 @@ func TestDefaultURLGetsClientIdentityQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "wss://api.telloai.io/sdk?protocol=" + ProtocolVersion + "&sdk=go&version=" + Version
+	want := "wss://api.telloai.io/sdk?sdk=go&version=" + Version + "&protocol=" + ProtocolVersion
 	if got != want {
 		t.Fatalf("url = %q, want %q", got, want)
 	}

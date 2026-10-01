@@ -221,8 +221,10 @@ They place real calls. Read [`examples/README.md`](examples/README.md) first.
 `tello-go 0.2.x` implements Tello WS protocol `1.0` (`tello.ProtocolVersion`).
 
 `Connect` appends `?sdk=go&version=<tello.Version>&protocol=<tello.ProtocolVersion>`
-to the URL (your path and other query parameters are kept) so the gateway can log
-which client connected. Releasing: bump `tello.Version` before tagging `vX.Y.Z`.
+to the URL so the gateway can log which client connected. Your path and other query
+pairs are kept exactly as written (order, encoding, bare flags); existing `sdk`,
+`version` and `protocol` pairs are replaced. Releasing: bump `tello.Version`, commit,
+then tag `vX.Y.Z` — the release-guard workflow fails if the tag and `tello.Version` differ.
 
 The full frame contract is in [`docs/protocol/sdk-ws.v1.md`](docs/protocol/sdk-ws.v1.md),
 with [`docs/events/sdk-events.v1.schema.json`](docs/events/sdk-events.v1.schema.json)
