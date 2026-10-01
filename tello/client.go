@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -408,17 +409,33 @@ func closeIfOpen(ch chan struct{}) {
 }
 
 // withClientIdentity tags the upgrade URL with sdk, version and protocol so
-// the gateway can log which client connected. User path and query are kept;
-// the three keys are overwritten.
+// the gateway can log which client connected. User query pairs are kept
+// byte-for-byte; only empty pieces and pairs whose form-decoded key is one of
+// the three identity keys are dropped before the identity pairs are appended.
 func withClientIdentity(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", err
 	}
-	q := u.Query()
-	q.Set("sdk", "go")
-	q.Set("version", Version)
-	q.Set("protocol", ProtocolVersion)
-	u.RawQuery = q.Encode()
+	var kept []string
+	for _, piece := range strings.Split(u.RawQuery, "&") {
+		if piece == "" {
+			continue
+		}
+		key, _, _ := strings.Cut(piece, "=")
+		if decoded, err := url.QueryUnescape(key); err == nil {
+			key = decoded
+		}
+		if key == "sdk" || key == "version" || key == "protocol" {
+			continue
+		}
+		kept = append(kept, piece)
+	}
+	kept = append(kept,
+		"sdk=go",
+		"version="+url.QueryEscape(Version),
+		"protocol="+url.QueryEscape(ProtocolVersion),
+	)
+	u.RawQuery = strings.Join(kept, "&")
 	return u.String(), nil
 }

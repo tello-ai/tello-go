@@ -232,8 +232,10 @@ go run ./examples/call-summary    # 게이트로 막아 둔 라이브 시나리�
 (`tello.ProtocolVersion`).
 
 `Connect`는 URL에 `?sdk=go&version=<tello.Version>&protocol=<tello.ProtocolVersion>`를
-붙입니다(사용자 경로·다른 쿼리는 유지). 게이트웨이가 어떤 클라이언트인지 로그로 남기는
-용도입니다. 릴리스: `vX.Y.Z` 태그 전에 `tello.Version`을 올립니다.
+붙입니다. 사용자 경로와 다른 쿼리 쌍은 쓴 그대로(순서·인코딩·값 없는 플래그까지) 유지하고,
+기존 `sdk`·`version`·`protocol` 쌍만 교체합니다. 게이트웨이가 어떤 클라이언트인지 로그로
+남기는 용도입니다. 릴리스: `tello.Version`을 올려 커밋한 뒤 `vX.Y.Z` 태그를 겁니다. 태그와
+`tello.Version`이 다르면 release-guard 워크플로가 실패합니다.
 
 프레임 계약 전문은 [`docs/protocol/sdk-ws.v1.md`](docs/protocol/sdk-ws.v1.md)에
 있고, [`docs/events/sdk-events.v1.schema.json`](docs/events/sdk-events.v1.schema.json)과

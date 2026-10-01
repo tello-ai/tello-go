@@ -1,0 +1,20 @@
+name: Release guard
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  version-matches-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tello.Version must equal the tag without its leading v
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' tello/types.go)"
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "::error file=tello/types.go::tello.Version is \"$VERSION\" but tag is $GITHUB_REF_NAME. Bump Version, commit, then re-tag."
+            exit 1
+          fi
