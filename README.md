@@ -220,6 +220,10 @@ They place real calls. Read [`examples/README.md`](examples/README.md) first.
 
 `tello-go 0.2.x` implements Tello WS protocol `1.0` (`tello.ProtocolVersion`).
 
+`Connect` appends `?sdk=go&version=<tello.Version>&protocol=<tello.ProtocolVersion>`
+to the URL (your path and other query parameters are kept) so the gateway can log
+which client connected. Releasing: bump `tello.Version` before tagging `vX.Y.Z`.
+
 The full frame contract is in [`docs/protocol/sdk-ws.v1.md`](docs/protocol/sdk-ws.v1.md),
 with [`docs/events/sdk-events.v1.schema.json`](docs/events/sdk-events.v1.schema.json)
 and [`docs/errors/errors.v1.json`](docs/errors/errors.v1.json). Those three files

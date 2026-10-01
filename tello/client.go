@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
@@ -69,7 +70,11 @@ func (c *Client) Connect(ctx context.Context) error {
 	dialer := websocket.Dialer{HandshakeTimeout: c.config.OpenTimeout}
 	// No Authorization header and no query-string token: the API key is
 	// authenticated from the first application frame instead (see authenticate).
-	conn, _, err := dialer.DialContext(ctx, c.config.URL, nil)
+	dialURL, err := withClientIdentity(c.config.URL)
+	if err != nil {
+		return err
+	}
+	conn, _, err := dialer.DialContext(ctx, dialURL, nil)
 	if err != nil {
 		return err
 	}
@@ -400,4 +405,20 @@ func closeIfOpen(ch chan struct{}) {
 	default:
 		close(ch)
 	}
+}
+
+// withClientIdentity tags the upgrade URL with sdk, version and protocol so
+// the gateway can log which client connected. User path and query are kept;
+// the three keys are overwritten.
+func withClientIdentity(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("sdk", "go")
+	q.Set("version", Version)
+	q.Set("protocol", ProtocolVersion)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
