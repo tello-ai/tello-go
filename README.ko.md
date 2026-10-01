@@ -231,6 +231,10 @@ go run ./examples/call-summary    # 게이트로 막아 둔 라이브 시나리�
 `tello-go 0.2.x`는 Tello WS 프로토콜 `1.0`을 구현합니다
 (`tello.ProtocolVersion`).
 
+`Connect`는 URL에 `?sdk=go&version=<tello.Version>&protocol=<tello.ProtocolVersion>`를
+붙입니다(사용자 경로·다른 쿼리는 유지). 게이트웨이가 어떤 클라이언트인지 로그로 남기는
+용도입니다. 릴리스: `vX.Y.Z` 태그 전에 `tello.Version`을 올립니다.
+
 프레임 계약 전문은 [`docs/protocol/sdk-ws.v1.md`](docs/protocol/sdk-ws.v1.md)에
 있고, [`docs/events/sdk-events.v1.schema.json`](docs/events/sdk-events.v1.schema.json)과
 [`docs/errors/errors.v1.json`](docs/errors/errors.v1.json)이 함께 있습니다. 이
