@@ -4,7 +4,7 @@ const ProtocolVersion = "1.0"
 
 // Version is this SDK release, without the leading "v" of the module tag.
 // Bump it in the same commit that is tagged for release.
-const Version = "0.2.2"
+const Version = "0.2.3"
 
 const (
 	EventTypeAuthOK            = "auth.ok"
