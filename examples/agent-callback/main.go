@@ -9,7 +9,7 @@
 //   - ending the call early with Cancel on an intent keyword
 //   - mapping error frames / auth failure to typed errors with errors.As
 //
-// Run against a locally-running turn-provider-gateway:
+// Run against a locally-running API gateway (api-gateway):
 //
 //	TELLO_API_KEY=tello_live_xxx TELLO_URL=ws://localhost:3000/sdk \
 //		go run ./examples/agent-callback

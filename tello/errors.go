@@ -1,5 +1,10 @@
 package tello
 
+import (
+	"context"
+	"fmt"
+)
+
 type TelloError struct {
 	Code     string
 	Message  string
@@ -12,12 +17,31 @@ func (e *TelloError) Error() string {
 
 type ConnectionClosedError struct{ TelloError }
 type SessionReplacedError struct{ TelloError }
-type AuthenticationError struct{ TelloError }
+
+// AuthenticationError reports that the gateway refused the connection's
+// authentication: unauthenticated, ipNotAllowed, close 4401, or no auth.ok in
+// time. For ipNotAllowed, IP is the connection's address as the gateway's
+// edge proved it, "" when it proved none; reconnecting from the same place
+// gets the same answer.
+type AuthenticationError struct {
+	TelloError
+	IP string
+}
+
 type ValidationError struct{ TelloError }
 type CallAlreadyActiveError struct{ TelloError }
 type NoActiveCallError struct{ TelloError }
 type CallRejectedError struct{ TelloError }
 type TelloServerError struct{ TelloError }
+
+// PermissionDeniedError reports insufficientScope: the server key lacks
+// RequiredScope (createCall, answer, sendDtmf and cancel need calls:write;
+// getSummary needs calls:read). Only that command is refused; the connection
+// stays open. Retrying does not help until the key is given the scope.
+type PermissionDeniedError struct {
+	TelloError
+	RequiredScope string
+}
 
 // CallRefusedError reports that CreateCall was refused by an account policy
 // gate before any call existed: no call.created, no callID, no charge. The
@@ -33,14 +57,85 @@ type CallRefusedError struct{ TelloError }
 // two will not.
 type CallProviderError struct{ TelloError }
 
-// ErrorFor maps a gateway error code to its typed error. Use it to turn an
-// EventTypeError event into the error WaitClosed would return:
-// ErrorFor(event.Code, event.Message, event.Question).
+// APIError is an error answer of the REST API (see NewAPI), or a success
+// answer the SDK could not accept.
+//
+// Code is the server's error code verbatim, in snake_case as the public REST
+// docs list it (for example "tool_not_found"); branch on Code and Status.
+// A response without the documented error envelope (a proxy page, for one)
+// gets Code "http_<status>" with the HTTP status text as Message. A success
+// status the API does not document for the method, or a body that is not a
+// JSON object, gets Code "invalid_response".
+//
+// Data is the envelope's data object (for example missingVariables or
+// reason), nil when absent. IdempotencyKey is the Idempotency-Key the
+// request sent, "" when it sent none; retry with the same key.
+type APIError struct {
+	TelloError
+	Status         int
+	Data           Object
+	IdempotencyKey string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("tello api: %d %s: %s", e.Status, e.Code, e.Message)
+}
+
+// APIConnectionError reports that a REST request got no complete response:
+// the connection failed, the timeout passed or ctx ended. Err is the cause,
+// so errors.Is(err, context.DeadlineExceeded) and errors.Is(err,
+// context.Canceled) work. Code is empty.
+//
+// A write (create, update, delete, crew generation, call draft) that failed
+// this way may already have been applied, and a confirmed call draft may
+// already be dialing. Check with get or list before sending it again, and
+// resend a create with the same IdempotencyKey (the key the request sent, ""
+// when none) so the server replays the first answer instead of acting twice.
+type APIConnectionError struct {
+	TelloError
+	IdempotencyKey string
+	Err            error
+}
+
+func (e *APIConnectionError) Error() string {
+	return e.Message
+}
+
+func (e *APIConnectionError) Unwrap() error {
+	return e.Err
+}
+
+// CrewGenerationTimeoutError reports that Crews.GenerateAndWait stopped
+// waiting before the job finished. The job keeps running; follow it with
+// CrewGenerations.Get(JobID). It unwraps to context.DeadlineExceeded.
+type CrewGenerationTimeoutError struct {
+	TelloError
+	JobID string
+}
+
+func (e *CrewGenerationTimeoutError) Error() string {
+	return e.Message
+}
+
+func (e *CrewGenerationTimeoutError) Unwrap() error {
+	return context.DeadlineExceeded
+}
+
+// Timeout reports true, like net.Error.
+func (e *CrewGenerationTimeoutError) Timeout() bool {
+	return true
+}
+
+// ErrorFor maps a gateway error code to its typed error. Use ErrorForEvent
+// to turn an EventTypeError event into the error WaitClosed would return,
+// with the code's extra fields.
 func ErrorFor(code, message, question string) error {
 	base := TelloError{Code: code, Message: message, Question: question}
 	switch code {
-	case "unauthenticated":
-		return &AuthenticationError{base}
+	case "unauthenticated", "ipNotAllowed":
+		return &AuthenticationError{TelloError: base}
+	case "insufficientScope":
+		return &PermissionDeniedError{TelloError: base}
 	case "toRequired",
 		"callIdRequired",
 		"dtmfDigitsRequired",
@@ -69,4 +164,18 @@ func ErrorFor(code, message, question string) error {
 	default:
 		return &TelloServerError{base}
 	}
+}
+
+// ErrorForEvent maps an EventTypeError event to its typed error, like
+// ErrorFor, and fills the code's extra fields: Question for callRejected,
+// RequiredScope for insufficientScope and IP for ipNotAllowed.
+func ErrorForEvent(event Event) error {
+	err := ErrorFor(event.Code, event.Message, event.Question)
+	switch typed := err.(type) {
+	case *AuthenticationError:
+		typed.IP = event.IP
+	case *PermissionDeniedError:
+		typed.RequiredScope = event.RequiredScope
+	}
+	return err
 }

@@ -45,6 +45,8 @@ func ParseEvent(frame map[string]any) Event {
 		event.Message = stringValue(frame["message"])
 		event.RequestID = stringValue(frame["requestId"])
 		event.Question = stringValue(frame["question"])
+		event.RequiredScope = stringValue(frame["requiredScope"])
+		event.IP = stringValue(frame["ip"])
 	}
 
 	return event

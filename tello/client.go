@@ -147,7 +147,7 @@ func (c *Client) authenticate(ctx context.Context, conn *websocket.Conn, closed,
 	// A missing auth.ok is an authentication failure, not a transport one: the
 	// gateway closes with 4401 on its own 10s deadline either way
 	// (docs/protocol/sdk-ws.v1.md section 2).
-	return &AuthenticationError{TelloError{Message: "timed out waiting for authentication"}}
+	return &AuthenticationError{TelloError: TelloError{Message: "timed out waiting for authentication"}}
 }
 
 func (c *Client) Close() error {
@@ -254,9 +254,18 @@ func (c *Client) CreateCall(ctx context.Context, to, prompt string, metadata map
 
 // newRequestID returns a random RFC 4122 version 4 UUID string.
 func newRequestID() (string, error) {
+	id, err := newUUIDv4()
+	if err != nil {
+		return "", fmt.Errorf("generate createCall requestId: %w", err)
+	}
+	return id, nil
+}
+
+// newUUIDv4 returns a random RFC 4122 version 4 UUID string.
+func newUUIDv4() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("generate createCall requestId: %w", err)
+		return "", err
 	}
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
@@ -326,8 +335,11 @@ func (c *Client) dispatch(gen int, frame map[string]any) {
 	// The call ends before the event reaches handlers, so a handler that
 	// starts a follow-up call starts a new generation.
 	if event.Type == EventTypeError {
-		err := ErrorFor(event.Code, event.Message, event.Question)
-		if event.Code == "unauthenticated" {
+		err := ErrorForEvent(event)
+		// An error before auth.ok answers the auth frame: unauthenticated or
+		// ipNotAllowed (close 4401), or internalError when the key could not
+		// be checked (close 1011).
+		if !c.authenticated || event.Code == "unauthenticated" || event.Code == "ipNotAllowed" {
 			c.closeErr = err
 			closeIfOpen(c.authDone)
 		} else if c.endsCallLocked(event) {
@@ -377,9 +389,15 @@ func (c *Client) noteClose(gen int, err error) {
 	if errors.As(err, &closeErr) {
 		switch closeErr.Code {
 		case closeUnauthenticated:
-			c.closeErr = &AuthenticationError{TelloError{Code: "unauthenticated", Message: closeErr.Text}}
+			c.closeErr = &AuthenticationError{TelloError: TelloError{Code: "unauthenticated", Message: closeErr.Text}}
 		case closeSessionReplaced:
 			c.closeErr = &SessionReplacedError{TelloError{Message: closeErr.Text}}
+		case websocket.CloseInternalServerErr:
+			// Before auth.ok, 1011 means the key could not be checked: not a
+			// refusal, so reconnecting later may succeed.
+			if !c.authenticated {
+				c.closeErr = &TelloServerError{TelloError{Code: "internalError", Message: closeErr.Text}}
+			}
 		}
 	}
 	if c.closeErr == nil && c.active {
