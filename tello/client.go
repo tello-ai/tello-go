@@ -254,9 +254,18 @@ func (c *Client) CreateCall(ctx context.Context, to, prompt string, metadata map
 
 // newRequestID returns a random RFC 4122 version 4 UUID string.
 func newRequestID() (string, error) {
+	id, err := newUUIDv4()
+	if err != nil {
+		return "", fmt.Errorf("generate createCall requestId: %w", err)
+	}
+	return id, nil
+}
+
+// newUUIDv4 returns a random RFC 4122 version 4 UUID string.
+func newUUIDv4() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("generate createCall requestId: %w", err)
+		return "", err
 	}
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80

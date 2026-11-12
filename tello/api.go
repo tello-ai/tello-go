@@ -47,6 +47,9 @@ type API struct {
 	Crews  *Crews
 	// CrewGenerations reads the jobs Crews.Generate starts.
 	CrewGenerations *CrewGenerations
+	// CallDrafts reviews a call scenario before dialing; Confirm places a
+	// real, billed call.
+	CallDrafts *CallDrafts
 
 	t *apiTransport
 }
@@ -126,6 +129,7 @@ func NewAPI(apiKey string, opts ...APIOption) (*API, error) {
 		Agents:          &Agents{t},
 		Crews:           &Crews{t},
 		CrewGenerations: &CrewGenerations{t},
+		CallDrafts:      &CallDrafts{t},
 		t:               t,
 	}, nil
 }
