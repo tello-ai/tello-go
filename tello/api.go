@@ -72,17 +72,18 @@ func WithAPIURL(url string) APIOption {
 	}
 }
 
-// WithAPITimeout sets how long a request may take, response included
-// (default 30s).
+// WithAPITimeout sets how long a read (list or get) may take, response
+// included (default 30s).
 func WithAPITimeout(timeout time.Duration) APIOption {
 	return func(config *apiConfig) {
 		config.timeout = timeout
 	}
 }
 
-// WithAPILongTimeout sets the timeout of CallDrafts.Create, CallDrafts.Revise,
-// CallDrafts.Confirm and Crews.Generate, which the server may take long to
-// answer (default 120s).
+// WithAPILongTimeout sets the timeout of every write, which the server may
+// take long to answer: tool, agent and crew creates, updates and deletes
+// (they save, deploy and publish in one request), Crews.Generate and
+// CallDrafts.Create, Revise and Confirm (default 120s).
 func WithAPILongTimeout(timeout time.Duration) APIOption {
 	return func(config *apiConfig) {
 		config.longTimeout = timeout

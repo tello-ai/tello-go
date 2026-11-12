@@ -178,7 +178,7 @@ func (t *apiTransport) createItem(ctx context.Context, collection string, body O
 	o := collectRequestOptions(opts)
 	return t.do(ctx, apiRequest{
 		method: http.MethodPost, path: "/" + collection, body: orEmpty(body),
-		idempotencyKey: o.idempotencyKey, accept: []int{http.StatusCreated},
+		idempotencyKey: o.idempotencyKey, long: true, accept: []int{http.StatusCreated},
 	})
 }
 
@@ -187,7 +187,7 @@ func (t *apiTransport) updateItem(ctx context.Context, collection, id string, pa
 	if err != nil {
 		return nil, err
 	}
-	return t.do(ctx, apiRequest{method: http.MethodPatch, path: path, body: orEmpty(patch), accept: []int{http.StatusOK}})
+	return t.do(ctx, apiRequest{method: http.MethodPatch, path: path, body: orEmpty(patch), long: true, accept: []int{http.StatusOK}})
 }
 
 func (t *apiTransport) deleteItem(ctx context.Context, collection, id string) error {
@@ -195,6 +195,6 @@ func (t *apiTransport) deleteItem(ctx context.Context, collection, id string) er
 	if err != nil {
 		return err
 	}
-	_, err = t.do(ctx, apiRequest{method: http.MethodDelete, path: path, accept: []int{http.StatusNoContent}})
+	_, err = t.do(ctx, apiRequest{method: http.MethodDelete, path: path, long: true, accept: []int{http.StatusNoContent}})
 	return err
 }

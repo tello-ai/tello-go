@@ -243,10 +243,11 @@ tool, err := api.Tools.Create(ctx, tello.Object{
 - **Base URL**: `WithAPIURL`, otherwise `TELLO_API_URL`, otherwise
   `https://api.telloai.io/v1`. It must be `https`; `http` is accepted only for
   `127.0.0.1`, `localhost` and `::1`. Trailing `/` is dropped.
-- **Timeouts**: `WithAPITimeout` (default 30s) for every request except
-  `CallDrafts.Create`, `CallDrafts.Revise`, `CallDrafts.Confirm` and
-  `Crews.Generate`, which use `WithAPILongTimeout` (default 120s). `ctx` can
-  end a request sooner.
+- **Timeouts**: reads (list, get) use `WithAPITimeout` (default 30s). Every
+  write — tool, agent and crew create, update and delete (each saves, deploys
+  and publishes in one request), `Crews.Generate` and
+  `CallDrafts.Create`/`Revise`/`Confirm` — uses `WithAPILongTimeout` (default
+  120s). `ctx` can end a request sooner.
 - **Headers**: `Accept: application/json`, `Content-Type: application/json`
   when there is a body, and `User-Agent: tello-go-sdk/<tello.Version>`.
 - **Bodies and results** are `tello.Object` (`map[string]any`). Responses are

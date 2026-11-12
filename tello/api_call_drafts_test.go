@@ -223,9 +223,10 @@ func TestCallDraftsRefuseBadArgumentsWithoutRequest(t *testing.T) {
 	}
 }
 
-// Only call drafts and crew generation wait for the long timeout; every
-// other request keeps the short one.
-func TestLongTimeoutAppliesToDraftsAndCrewGenerationOnly(t *testing.T) {
+// Every write waits for the long timeout: call drafts, crew generation and
+// tool, agent and crew creates, updates and deletes (they save, deploy and
+// publish in one request). Reads keep the short one.
+func TestLongTimeoutAppliesToEveryWrite(t *testing.T) {
 	tests := []struct {
 		name   string
 		status int
@@ -248,12 +249,27 @@ func TestLongTimeoutAppliesToDraftsAndCrewGenerationOnly(t *testing.T) {
 			_, err := a.Crews.Generate(ctx, Object{"goal": "g"})
 			return err
 		}},
-		{name: "tools.create", status: 201, call: func(a *API, ctx context.Context) error {
+		{name: "tools.create", status: 201, long: true, call: func(a *API, ctx context.Context) error {
 			_, err := a.Tools.Create(ctx, Object{})
 			return err
 		}},
-		{name: "agents.update", status: 200, call: func(a *API, ctx context.Context) error {
+		{name: "agents.update", status: 200, long: true, call: func(a *API, ctx context.Context) error {
 			_, err := a.Agents.Update(ctx, "1", Object{})
+			return err
+		}},
+		{name: "crews.delete", status: 204, long: true, call: func(a *API, ctx context.Context) error {
+			return a.Crews.Delete(ctx, "1")
+		}},
+		{name: "tools.get", status: 200, call: func(a *API, ctx context.Context) error {
+			_, err := a.Tools.Get(ctx, "1")
+			return err
+		}},
+		{name: "agents.list", status: 200, call: func(a *API, ctx context.Context) error {
+			_, err := a.Agents.List(ctx)
+			return err
+		}},
+		{name: "crewGenerations.get", status: 200, call: func(a *API, ctx context.Context) error {
+			_, err := a.CrewGenerations.Get(ctx, "1")
 			return err
 		}},
 	}

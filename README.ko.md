@@ -250,9 +250,10 @@ tool, err := api.Tools.Create(ctx, tello.Object{
 - **base URL**: `WithAPIURL`, 없으면 `TELLO_API_URL`, 없으면
   `https://api.telloai.io/v1`. `https`만 받고, `http`는 `127.0.0.1`·`localhost`·`::1`
   에만 허용합니다. 끝의 `/`는 뗍니다.
-- **타임아웃**: `WithAPITimeout`(기본 30초). 단 `CallDrafts.Create`·`Revise`·
-  `Confirm`과 `Crews.Generate`는 `WithAPILongTimeout`(기본 120초)을 씁니다. `ctx`로
-  더 일찍 끝낼 수 있습니다.
+- **타임아웃**: 조회(목록·상세)는 `WithAPITimeout`(기본 30초). 모든 쓰기 — 도구·에이전트·
+  크루 생성·수정·삭제(저장·배포·운영 반영을 한 요청에서 함), `Crews.Generate`,
+  `CallDrafts.Create`·`Revise`·`Confirm` — 는 `WithAPILongTimeout`(기본 120초)을
+  씁니다. `ctx`로 더 일찍 끝낼 수 있습니다.
 - **헤더**: `Accept: application/json`, 본문이 있으면 `Content-Type: application/json`,
   `User-Agent: tello-go-sdk/<tello.Version>`.
 - **본문과 결과**는 `tello.Object`(`map[string]any`)입니다. 응답은 `UseNumber`로
