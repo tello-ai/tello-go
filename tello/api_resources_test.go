@@ -27,6 +27,28 @@ var crudCases = []crudCase{
 		},
 		delete: func(a *API, ctx context.Context, id string) error { return a.Tools.Delete(ctx, id) },
 	},
+	{
+		collection: "agents",
+		get:        func(a *API, ctx context.Context, id string) (Object, error) { return a.Agents.Get(ctx, id) },
+		create: func(a *API, ctx context.Context, body Object, opts ...RequestOption) (Object, error) {
+			return a.Agents.Create(ctx, body, opts...)
+		},
+		update: func(a *API, ctx context.Context, id string, patch Object) (Object, error) {
+			return a.Agents.Update(ctx, id, patch)
+		},
+		delete: func(a *API, ctx context.Context, id string) error { return a.Agents.Delete(ctx, id) },
+	},
+	{
+		collection: "crews",
+		get:        func(a *API, ctx context.Context, id string) (Object, error) { return a.Crews.Get(ctx, id) },
+		create: func(a *API, ctx context.Context, body Object, opts ...RequestOption) (Object, error) {
+			return a.Crews.Create(ctx, body, opts...)
+		},
+		update: func(a *API, ctx context.Context, id string, patch Object) (Object, error) {
+			return a.Crews.Update(ctx, id, patch)
+		},
+		delete: func(a *API, ctx context.Context, id string) error { return a.Crews.Delete(ctx, id) },
+	},
 }
 
 func TestResourceGet(t *testing.T) {
@@ -302,5 +324,45 @@ func TestToolsList(t *testing.T) {
 				t.Fatalf("request = %s %s?%s", req.Method, req.Path, req.RawQuery)
 			}
 		})
+	}
+}
+
+func TestAgentsAndCrewsList(t *testing.T) {
+	tests := []struct {
+		collection string
+		list       func(*API, context.Context) (Object, error)
+	}{
+		{collection: "agents", list: func(a *API, ctx context.Context) (Object, error) { return a.Agents.List(ctx) }},
+		{collection: "crews", list: func(a *API, ctx context.Context) (Object, error) { return a.Crews.List(ctx) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.collection, func(t *testing.T) {
+			f := newFakeAPI(t, reply(http.StatusOK, `{"data":[{"id":"1","name":"n","description":null,"isDefault":true}]}`))
+			api := newTestAPI(t, f)
+
+			page, err := tt.list(api, context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, ok := page["data"].([]any)
+			if !ok || len(data) != 1 || data[0].(map[string]any)["isDefault"] != true {
+				t.Fatalf("page = %v", page)
+			}
+			req := f.only(t)
+			if req.Method != http.MethodGet || req.Path != "/v1/"+tt.collection || req.RawQuery != "" {
+				t.Fatalf("request = %s %s?%s", req.Method, req.Path, req.RawQuery)
+			}
+		})
+	}
+}
+
+func TestAgentsListRefusesUndocumentedSuccessStatus(t *testing.T) {
+	f := newFakeAPI(t, reply(http.StatusAccepted, `{"data":[]}`))
+	api := newTestAPI(t, f)
+
+	_, err := api.Agents.List(context.Background())
+
+	if apiErr := asAPIError(t, err); apiErr.Code != "invalid_response" || apiErr.Status != 202 {
+		t.Fatalf("error = %+v", apiErr)
 	}
 }

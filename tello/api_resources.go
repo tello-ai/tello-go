@@ -81,6 +81,71 @@ func (r *Tools) Delete(ctx context.Context, id string) error {
 	return r.t.deleteItem(ctx, "tools", id)
 }
 
+// Agents manages the account's agents. Creates, updates and deletes are
+// live for the next call as soon as they succeed.
+type Agents struct {
+	t *apiTransport
+}
+
+// List returns the agents as the API sends them:
+// {"data": [{"id", "name", "description", "isDefault"}...]}.
+func (r *Agents) List(ctx context.Context) (Object, error) {
+	return r.t.listItems(ctx, "agents")
+}
+
+// Get returns one agent with its full settings.
+func (r *Agents) Get(ctx context.Context, id string) (Object, error) {
+	return r.t.getItem(ctx, "agents", id)
+}
+
+// Create creates an agent from body and returns it. WithIdempotencyKey
+// makes the create safe to resend.
+func (r *Agents) Create(ctx context.Context, body Object, opts ...RequestOption) (Object, error) {
+	return r.t.createItem(ctx, "agents", body, opts)
+}
+
+// Update changes only the fields in patch and returns the agent.
+func (r *Agents) Update(ctx context.Context, id string, patch Object) (Object, error) {
+	return r.t.updateItem(ctx, "agents", id, patch)
+}
+
+// Delete deletes an agent.
+func (r *Agents) Delete(ctx context.Context, id string) error {
+	return r.t.deleteItem(ctx, "agents", id)
+}
+
+// Crews manages the account's crews. Creates, updates and deletes are live
+// for the next call as soon as they succeed.
+type Crews struct {
+	t *apiTransport
+}
+
+// List returns the crews as the API sends them: {"data": [crew...]}.
+func (r *Crews) List(ctx context.Context) (Object, error) {
+	return r.t.listItems(ctx, "crews")
+}
+
+// Get returns one crew with its full settings.
+func (r *Crews) Get(ctx context.Context, id string) (Object, error) {
+	return r.t.getItem(ctx, "crews", id)
+}
+
+// Create creates a crew from body and returns it. WithIdempotencyKey makes
+// the create safe to resend.
+func (r *Crews) Create(ctx context.Context, body Object, opts ...RequestOption) (Object, error) {
+	return r.t.createItem(ctx, "crews", body, opts)
+}
+
+// Update changes only the fields in patch and returns the crew.
+func (r *Crews) Update(ctx context.Context, id string, patch Object) (Object, error) {
+	return r.t.updateItem(ctx, "crews", id, patch)
+}
+
+// Delete deletes a crew.
+func (r *Crews) Delete(ctx context.Context, id string) error {
+	return r.t.deleteItem(ctx, "crews", id)
+}
+
 // itemPath is the escaped path of one item of collection.
 func itemPath(collection, id string) (string, error) {
 	if id == "" {
@@ -103,6 +168,10 @@ func (t *apiTransport) getItem(ctx context.Context, collection, id string) (Obje
 		return nil, err
 	}
 	return t.do(ctx, apiRequest{method: http.MethodGet, path: path, accept: []int{http.StatusOK}})
+}
+
+func (t *apiTransport) listItems(ctx context.Context, collection string) (Object, error) {
+	return t.do(ctx, apiRequest{method: http.MethodGet, path: "/" + collection, accept: []int{http.StatusOK}})
 }
 
 func (t *apiTransport) createItem(ctx context.Context, collection string, body Object, opts []RequestOption) (Object, error) {
