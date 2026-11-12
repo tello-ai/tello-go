@@ -286,8 +286,8 @@ they are.
 `tello.WithIdempotencyKey(key)` sends `Idempotency-Key` on the tool, agent and
 crew creates, `Crews.Generate` and `CallDrafts.Create`/`Revise`/`Confirm`;
 without it nothing is sent. `CallDrafts.Confirm` needs a key, so it generates
-a UUID v4 when you give none. A key must be 1-255 bytes with no comma or
-control character; otherwise the method fails without sending anything. Every
+a UUID v4 when you give none. A key must be 1-255 printable ASCII characters
+(0x20-0x7E) with no comma; otherwise the method fails without sending anything. Every
 error carries the key the request sent in `IdempotencyKey`, so you can retry
 with it.
 

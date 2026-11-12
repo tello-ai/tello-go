@@ -262,16 +262,16 @@ func decodeJSON(raw []byte, v any) error {
 	return dec.Decode(v)
 }
 
-// validateIdempotencyKey enforces what the API accepts: 1-255 bytes with no
-// comma and no control character.
+// validateIdempotencyKey enforces what the API accepts: 1-255 printable
+// ASCII characters (0x20-0x7E) with no comma.
 func validateIdempotencyKey(key string) error {
 	valid := len(key) >= 1 && len(key) <= 255
 	for i := 0; valid && i < len(key); i++ {
 		c := key[i]
-		valid = c != ',' && c >= 0x20 && c != 0x7f
+		valid = c >= 0x20 && c <= 0x7e && c != ','
 	}
 	if !valid {
-		return errors.New("tello api: idempotency key must be 1-255 bytes with no comma or control character")
+		return errors.New("tello api: idempotency key must be 1-255 printable ASCII characters with no comma")
 	}
 	return nil
 }

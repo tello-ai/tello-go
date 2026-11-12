@@ -486,7 +486,7 @@ func TestAPIRejectsInvalidIdempotencyKeysWithoutRequest(t *testing.T) {
 	f := newFakeAPI(t, reply(http.StatusCreated, `{}`))
 	api := newTestAPI(t, f)
 
-	for _, key := range []string{"a,b", "line\nbreak", "tab\tkey", "del\x7f", strings.Repeat("k", 256)} {
+	for _, key := range []string{"a,b", "line\nbreak", "tab\tkey", "del\x7f", strings.Repeat("k", 256), "키-1", "caf\u00e9", "\xff"} {
 		_, err := api.t.do(context.Background(), apiRequest{method: http.MethodPost, path: "/tools", body: Object{}, idempotencyKey: key, accept: []int{201}})
 		if err == nil {
 			t.Fatalf("key %q accepted", key)

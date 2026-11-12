@@ -289,7 +289,7 @@ tool, err := api.Tools.Create(ctx, tello.Object{
 `tello.WithIdempotencyKey(key)`는 도구·에이전트·크루 생성, `Crews.Generate`,
 `CallDrafts.Create`·`Revise`·`Confirm`에 `Idempotency-Key`를 보냅니다. 주지 않으면
 보내지 않습니다. 단 `CallDrafts.Confirm`은 키가 필수라 주지 않으면 UUID v4를 만들어
-보냅니다. 키는 1~255바이트에 쉼표·제어문자가 없어야 하고, 아니면 요청 없이 오류를
+보냅니다. 키는 출력 가능한 ASCII(0x20–0x7E) 1~255자에 쉼표가 없어야 하고, 아니면 요청 없이 오류를
 돌려줍니다. 모든 오류의 `IdempotencyKey`에 보낸 키가 실리므로 그 키로 다시 보낼 수
 있습니다.
 

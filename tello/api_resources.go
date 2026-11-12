@@ -17,8 +17,8 @@ type requestOptions struct {
 
 // WithIdempotencyKey sends key as the Idempotency-Key header: resending the
 // same request with the same key replays the first answer instead of acting
-// twice. The key must be 1-255 bytes with no comma or control character;
-// otherwise the method fails without sending anything.
+// twice. The key must be 1-255 printable ASCII characters (0x20-0x7E) with
+// no comma; otherwise the method fails without sending anything.
 func WithIdempotencyKey(key string) RequestOption {
 	return func(o *requestOptions) {
 		o.idempotencyKey = key
