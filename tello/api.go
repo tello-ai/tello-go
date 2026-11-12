@@ -42,6 +42,8 @@ type Object = map[string]any
 // It never retries a request. Creates, updates and deletes are saved,
 // deployed and live for the next call as soon as they succeed.
 type API struct {
+	Tools *Tools
+
 	t *apiTransport
 }
 
@@ -115,7 +117,7 @@ func NewAPI(apiKey string, opts ...APIOption) (*API, error) {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}
-	return &API{t: t}, nil
+	return &API{Tools: &Tools{t}, t: t}, nil
 }
 
 // resolveAPIURL validates raw and drops its trailing slashes.
