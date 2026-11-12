@@ -94,7 +94,7 @@ func main() {
 | `EventTypeCallCompleted` | `call.completed` | `Status` |
 | `EventTypeCallNoAnswer` | `call.noAnswer` | `Status`, `FailureReason` |
 | `EventTypeCallFailed` | `call.failed` | `Status`, `FailureReason` |
-| `EventTypeError` | `error` | `Code`, `Message`, `RequestID`, `Question` |
+| `EventTypeError` | `error` | `Code`, `Message`, `RequestID`, `Question`, `RequiredScope`, `IP` |
 | `EventTypeDisconnected` | `disconnected` | SDK 자체 이벤트. WS가 닫힐 때 발생 |
 
 `auth.ok`는 `Connect`가 내부에서 소비하며 밖으로 다시 emit 하지 않습니다.
@@ -136,6 +136,8 @@ UUID를 씁니다. 명령마다 `requestID`를 따로 주고, `CreateCall`에 �
 | 게이트웨이 `code` | 오류 타입 |
 | --- | --- |
 | `unauthenticated` | `*AuthenticationError` (인증 핸드셰이크. 4401 종료 포함) |
+| `ipNotAllowed` | `*AuthenticationError`, `.IP` 포함 (인증 핸드셰이크. 키의 허용 IP 목록 밖. 4401 종료) |
+| `insufficientScope` | `*PermissionDeniedError`, `.RequiredScope` 포함 (그 명령만 거절하고 연결은 유지) |
 | `toRequired` | `*ValidationError` |
 | `callIdRequired` | `*ValidationError` |
 | `dtmfDigitsRequired` | `*ValidationError` |
@@ -145,7 +147,7 @@ UUID를 씁니다. 명령마다 `requestID`를 따로 주고, `CreateCall`에 �
 | `callNotFound` | `*ValidationError` |
 | `callNotCompleted` | `*ValidationError` |
 | `callRejected` | `*CallRejectedError` (`.Question` 포함) |
-| `internalError` | `*TelloServerError` |
+| `internalError` | `*TelloServerError` (`auth` 응답이면 1011 종료 동반: 키를 확인하지 못함. 잠시 뒤 다시 접속) |
 
 모든 오류는 게이트웨이 코드를 `.Code`에 담고 있습니다. **분기는 `.Code`로 하고
 `.Message`로는 하지 마세요.** 메시지는 게이트웨이가 다시 쓸 수 있는 표시용
@@ -180,12 +182,13 @@ UUID를 씁니다. 명령마다 `requestID`를 따로 주고, `CreateCall`에 �
   진행 중인 통화는 계속됩니다.
 - `noActiveCall`은 대기를 끝내지 않습니다.
 
-`EventTypeError` 핸들러는 프레임을 `tello.Event`로 받습니다. 타입이 있는 오류로
-바꾸려면 `tello.ErrorFor`를 쓰세요:
+`EventTypeError` 핸들러는 프레임을 `tello.Event`로 받습니다. `.Question`·
+`.RequiredScope`·`.IP`까지 채운 타입 있는 오류로 바꾸려면 `tello.ErrorForEvent`를
+쓰세요:
 
 ```go
 client.On(tello.EventTypeError, func(_ context.Context, event tello.Event) error {
-	err := tello.ErrorFor(event.Code, event.Message, event.Question)
+	err := tello.ErrorForEvent(event)
 	var invalid *tello.ValidationError
 	if errors.As(err, &invalid) {
 		log.Printf("command %s rejected: %s", event.RequestID, invalid.Code)
@@ -196,7 +199,8 @@ client.On(tello.EventTypeError, func(_ context.Context, event tello.Event) error
 
 `WaitClosed`가 반환하는 오류:
 
-- 인증 실패(`unauthenticated` 프레임, 4401 종료, `auth.ok` 타임아웃) → `Connect`가 `*AuthenticationError` 반환
+- 인증 실패(`unauthenticated`·`ipNotAllowed` 프레임, 4401 종료, `auth.ok` 타임아웃) → `Connect`가 `*AuthenticationError` 반환
+- 인증 때 키를 확인하지 못함(`internalError` 프레임 또는 1011 종료) → `Connect`가 `*TelloServerError` 반환. 거절이 아니므로 잠시 뒤 다시 접속
 - 통화 시작 거부, 또는 `call.created` 이후 통화 스트림 실패(`CreateCall`에 대한 오류로 옴) → 위 표의 대응 오류
 - 통화 도중 연결 끊김 → `*ConnectionClosedError`
 - 다른 연결에 세션을 빼앗김(4429 종료) → `*SessionReplacedError`

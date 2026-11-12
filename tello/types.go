@@ -40,6 +40,8 @@ type Event struct {
 	Message         string
 	RequestID       string
 	Question        string
+	RequiredScope   string
+	IP              string
 	DurationSeconds int
 	Transcript      string
 	Summary         string

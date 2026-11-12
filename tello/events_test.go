@@ -32,6 +32,25 @@ func TestParseErrorFrame(t *testing.T) {
 	}
 }
 
+func TestParseErrorFrameExtraFields(t *testing.T) {
+	scope := ParseEvent(map[string]any{
+		"type": "error", "version": "1.0", "code": "insufficientScope",
+		"message": "m", "requestId": "r1", "requiredScope": "calls:write",
+	})
+	if scope.RequiredScope != "calls:write" {
+		t.Fatalf("RequiredScope = %q", scope.RequiredScope)
+	}
+
+	ip := ParseEvent(map[string]any{"type": "error", "version": "1.0", "code": "ipNotAllowed", "message": "m", "ip": "203.0.113.7"})
+	if ip.IP != "203.0.113.7" {
+		t.Fatalf("IP = %q", ip.IP)
+	}
+	unproven := ParseEvent(map[string]any{"type": "error", "version": "1.0", "code": "ipNotAllowed", "message": "m", "ip": nil})
+	if unproven.IP != "" {
+		t.Fatalf("IP = %q, want empty for null", unproven.IP)
+	}
+}
+
 func TestParseCallSummary(t *testing.T) {
 	summary := ParseEvent(map[string]any{
 		"type":            "call.summary",

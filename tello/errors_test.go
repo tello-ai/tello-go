@@ -28,6 +28,8 @@ func codeOf(err error) string {
 		return typed.Code
 	case *CallProviderError:
 		return typed.Code
+	case *PermissionDeniedError:
+		return typed.Code
 	case *TelloServerError:
 		return typed.Code
 	default:
@@ -44,6 +46,14 @@ var errorContract = []struct {
 }{
 	{"unauthenticated", "AuthenticationError", func(err error) bool {
 		var target *AuthenticationError
+		return errors.As(err, &target)
+	}},
+	{"ipNotAllowed", "AuthenticationError", func(err error) bool {
+		var target *AuthenticationError
+		return errors.As(err, &target)
+	}},
+	{"insufficientScope", "PermissionDeniedError", func(err error) bool {
+		var target *PermissionDeniedError
 		return errors.As(err, &target)
 	}},
 	{"callAlreadyActive", "CallAlreadyActiveError", func(err error) bool {
@@ -96,8 +106,8 @@ func isServer(err error) bool {
 }
 
 func TestErrorForMapsEveryContractCode(t *testing.T) {
-	if len(errorContract) != 19 {
-		t.Fatalf("contract defines 19 codes, table has %d", len(errorContract))
+	if len(errorContract) != 21 {
+		t.Fatalf("contract defines 21 codes, table has %d", len(errorContract))
 	}
 
 	for _, entry := range errorContract {
@@ -131,5 +141,25 @@ func TestCallRejectedPreservesQuestion(t *testing.T) {
 	}
 	if rejected.Question != "why?" {
 		t.Fatalf("expected question, got %q", rejected.Question)
+	}
+}
+
+func TestErrorForEventCarriesExtraFields(t *testing.T) {
+	scope := ErrorForEvent(Event{Code: "insufficientScope", Message: "m", RequestID: "r-1", RequiredScope: "calls:write"})
+	var denied *PermissionDeniedError
+	if !errors.As(scope, &denied) || denied.RequiredScope != "calls:write" || denied.Code != "insufficientScope" {
+		t.Fatalf("expected PermissionDeniedError with requiredScope, got %T: %+v", scope, scope)
+	}
+
+	ip := ErrorForEvent(Event{Code: "ipNotAllowed", Message: "m", IP: "203.0.113.7"})
+	var auth *AuthenticationError
+	if !errors.As(ip, &auth) || auth.IP != "203.0.113.7" || auth.Code != "ipNotAllowed" {
+		t.Fatalf("expected AuthenticationError with ip, got %T: %+v", ip, ip)
+	}
+
+	rejected := ErrorForEvent(Event{Code: "callRejected", Message: "m", Question: "q"})
+	var rej *CallRejectedError
+	if !errors.As(rejected, &rej) || rej.Question != "q" {
+		t.Fatalf("expected CallRejectedError with question, got %T: %+v", rejected, rejected)
 	}
 }

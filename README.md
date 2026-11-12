@@ -89,7 +89,7 @@ frame.
 | `EventTypeCallCompleted` | `call.completed` | `Status` |
 | `EventTypeCallNoAnswer` | `call.noAnswer` | `Status`, `FailureReason` |
 | `EventTypeCallFailed` | `call.failed` | `Status`, `FailureReason` |
-| `EventTypeError` | `error` | `Code`, `Message`, `RequestID`, `Question` |
+| `EventTypeError` | `error` | `Code`, `Message`, `RequestID`, `Question`, `RequiredScope`, `IP` |
 | `EventTypeDisconnected` | `disconnected` | SDK-local; emitted when the WS closes |
 
 `auth.ok` is consumed internally by `Connect` and never re-emitted.
@@ -130,6 +130,8 @@ Gateway error frames map 1:1 to typed errors:
 | gateway `code` | error |
 | --- | --- |
 | `unauthenticated` | `*AuthenticationError` (auth handshake; also close code 4401) |
+| `ipNotAllowed` | `*AuthenticationError` with `.IP` (auth handshake: the key's allowed IP list excludes this connection; close 4401) |
+| `insufficientScope` | `*PermissionDeniedError` with `.RequiredScope` (only that command is refused; the connection stays open) |
 | `toRequired` | `*ValidationError` |
 | `callIdRequired` | `*ValidationError` |
 | `dtmfDigitsRequired` | `*ValidationError` |
@@ -139,7 +141,7 @@ Gateway error frames map 1:1 to typed errors:
 | `callNotFound` | `*ValidationError` |
 | `callNotCompleted` | `*ValidationError` |
 | `callRejected` | `*CallRejectedError` (with `.Question`) |
-| `internalError` | `*TelloServerError` |
+| `internalError` | `*TelloServerError` (answering auth with close 1011: the key could not be checked; reconnect later) |
 
 Every error carries the gateway code on `.Code` — branch on that, never on
 `.Message`, which is display text the gateway may reword.
@@ -174,11 +176,12 @@ special:
 - `noActiveCall` never ends the wait.
 
 An `EventTypeError` handler receives the frame as a `tello.Event`; turn it
-into the typed error with `tello.ErrorFor`:
+into the typed error, with `.Question`, `.RequiredScope` or `.IP` filled in,
+with `tello.ErrorForEvent`:
 
 ```go
 client.On(tello.EventTypeError, func(_ context.Context, event tello.Event) error {
-	err := tello.ErrorFor(event.Code, event.Message, event.Question)
+	err := tello.ErrorForEvent(event)
 	var invalid *tello.ValidationError
 	if errors.As(err, &invalid) {
 		log.Printf("command %s rejected: %s", event.RequestID, invalid.Code)
@@ -189,7 +192,8 @@ client.On(tello.EventTypeError, func(_ context.Context, event tello.Event) error
 
 `WaitClosed` returns:
 
-- auth failure (`unauthenticated` frame, close 4401, or `auth.ok` timeout) → `*AuthenticationError`, returned from `Connect`
+- auth failure (`unauthenticated` or `ipNotAllowed` frame, close 4401, or `auth.ok` timeout) → `*AuthenticationError`, returned from `Connect`
+- the key could not be checked at auth (`internalError` frame or close 1011) → `*TelloServerError`, returned from `Connect`; not a refusal, so reconnect later
 - a call-start rejection, or a failure of the call's stream after `call.created` (reported against `CreateCall`) → its mapped error above
 - the connection dropping mid-call → `*ConnectionClosedError`
 - the session being displaced (close 4429) → `*SessionReplacedError`
