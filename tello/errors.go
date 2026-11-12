@@ -1,6 +1,9 @@
 package tello
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 type TelloError struct {
 	Code     string
@@ -81,6 +84,27 @@ func (e *APIConnectionError) Error() string {
 
 func (e *APIConnectionError) Unwrap() error {
 	return e.Err
+}
+
+// CrewGenerationTimeoutError reports that Crews.GenerateAndWait stopped
+// waiting before the job finished. The job keeps running; follow it with
+// CrewGenerations.Get(JobID). It unwraps to context.DeadlineExceeded.
+type CrewGenerationTimeoutError struct {
+	TelloError
+	JobID string
+}
+
+func (e *CrewGenerationTimeoutError) Error() string {
+	return e.Message
+}
+
+func (e *CrewGenerationTimeoutError) Unwrap() error {
+	return context.DeadlineExceeded
+}
+
+// Timeout reports true, like net.Error.
+func (e *CrewGenerationTimeoutError) Timeout() bool {
+	return true
 }
 
 // ErrorFor maps a gateway error code to its typed error. Use it to turn an

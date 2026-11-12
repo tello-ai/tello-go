@@ -45,6 +45,8 @@ type API struct {
 	Tools  *Tools
 	Agents *Agents
 	Crews  *Crews
+	// CrewGenerations reads the jobs Crews.Generate starts.
+	CrewGenerations *CrewGenerations
 
 	t *apiTransport
 }
@@ -119,7 +121,13 @@ func NewAPI(apiKey string, opts ...APIOption) (*API, error) {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}
-	return &API{Tools: &Tools{t}, Agents: &Agents{t}, Crews: &Crews{t}, t: t}, nil
+	return &API{
+		Tools:           &Tools{t},
+		Agents:          &Agents{t},
+		Crews:           &Crews{t},
+		CrewGenerations: &CrewGenerations{t},
+		t:               t,
+	}, nil
 }
 
 // resolveAPIURL validates raw and drops its trailing slashes.
@@ -168,6 +176,9 @@ type apiRequest struct {
 	// accept lists the success statuses the API documents for the request;
 	// another 2xx is an invalid_response.
 	accept []int
+	// require names response fields that must be non-empty strings;
+	// a response without one is an invalid_response.
+	require []string
 }
 
 // do sends r and returns the response object; a 204 returns nil.
@@ -232,6 +243,11 @@ func (t *apiTransport) do(ctx context.Context, r apiRequest) (Object, error) {
 	var obj Object
 	if err := decodeJSON(raw, &obj); err != nil || obj == nil {
 		return nil, invalidResponse(resp.StatusCode, r, fmt.Sprintf("response to %s %s is not a JSON object", r.method, r.path))
+	}
+	for _, field := range r.require {
+		if value, _ := obj[field].(string); value == "" {
+			return nil, invalidResponse(resp.StatusCode, r, fmt.Sprintf("response to %s %s has no %s", r.method, r.path, field))
+		}
 	}
 	return obj, nil
 }
