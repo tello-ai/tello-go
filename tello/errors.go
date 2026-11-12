@@ -1,5 +1,7 @@
 package tello
 
+import "fmt"
+
 type TelloError struct {
 	Code     string
 	Message  string
@@ -32,6 +34,54 @@ type CallRefusedError struct{ TelloError }
 // callProviderDraining and callProviderUnavailable may succeed later; the other
 // two will not.
 type CallProviderError struct{ TelloError }
+
+// APIError is an error answer of the REST API (see NewAPI), or a success
+// answer the SDK could not accept.
+//
+// Code is the server's error code verbatim, in snake_case as the public REST
+// docs list it (for example "tool_not_found"); branch on Code and Status.
+// A response without the documented error envelope (a proxy page, for one)
+// gets Code "http_<status>" with the HTTP status text as Message. A success
+// status the API does not document for the method, or a body that is not a
+// JSON object, gets Code "invalid_response".
+//
+// Data is the envelope's data object (for example missingVariables or
+// reason), nil when absent. IdempotencyKey is the Idempotency-Key the
+// request sent, "" when it sent none; retry with the same key.
+type APIError struct {
+	TelloError
+	Status         int
+	Data           Object
+	IdempotencyKey string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("tello api: %d %s: %s", e.Status, e.Code, e.Message)
+}
+
+// APIConnectionError reports that a REST request got no complete response:
+// the connection failed, the timeout passed or ctx ended. Err is the cause,
+// so errors.Is(err, context.DeadlineExceeded) and errors.Is(err,
+// context.Canceled) work. Code is empty.
+//
+// A write (create, update, delete, crew generation, call draft) that failed
+// this way may already have been applied, and a confirmed call draft may
+// already be dialing. Check with get or list before sending it again, and
+// resend a create with the same IdempotencyKey (the key the request sent, ""
+// when none) so the server replays the first answer instead of acting twice.
+type APIConnectionError struct {
+	TelloError
+	IdempotencyKey string
+	Err            error
+}
+
+func (e *APIConnectionError) Error() string {
+	return e.Message
+}
+
+func (e *APIConnectionError) Unwrap() error {
+	return e.Err
+}
 
 // ErrorFor maps a gateway error code to its typed error. Use it to turn an
 // EventTypeError event into the error WaitClosed would return:

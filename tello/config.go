@@ -40,8 +40,9 @@ func WithCloseTimeout(timeout time.Duration) Option {
 }
 
 func resolveConfig(apiKey string, options ...Option) (Config, error) {
-	if apiKey == "" {
-		apiKey = os.Getenv(EnvAPIKey)
+	apiKey, err := resolveAPIKey(apiKey)
+	if err != nil {
+		return Config{}, err
 	}
 	config := Config{
 		APIKey:       apiKey,
@@ -52,10 +53,19 @@ func resolveConfig(apiKey string, options ...Option) (Config, error) {
 	for _, option := range options {
 		option(&config)
 	}
-	if config.APIKey == "" {
-		return Config{}, errors.New("apiKey is required")
-	}
 	return config, nil
+}
+
+// resolveAPIKey returns apiKey, or TELLO_API_KEY when apiKey is empty. The
+// WebSocket client and the REST API share this rule and its error.
+func resolveAPIKey(apiKey string) (string, error) {
+	if apiKey == "" {
+		apiKey = os.Getenv(EnvAPIKey)
+	}
+	if apiKey == "" {
+		return "", errors.New("apiKey is required")
+	}
+	return apiKey, nil
 }
 
 func getenv(key, fallback string) string {
