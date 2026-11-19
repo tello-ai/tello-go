@@ -10,8 +10,12 @@ generation and call drafts; see [section 7](#7-rest-resource-api)).
 
 > repo: `tello-go` · module: `github.com/tello-ai/tello-go` · package: `tello`
 >
-> There is no webhook surface. The call endpoints of the REST API
-> (`/v1/calls`: create, get, list, end, transfer) are not part of this SDK.
+> This SDK has no webhook surface. Call event webhooks (`call.ringing`,
+> `call.started`, `call.transfer_started`, `call.ended`) are set per agent and
+> crew in the portal's Webhook tab, with an optional auth header (name and
+> value), a timeout and extra headers; there is no signing secret. The call
+> endpoints of the REST API (`/v1/calls`: create, get, list, end, transfer)
+> are not part of this SDK.
 
 ## 1. Install
 
@@ -357,7 +361,7 @@ They place real calls. Read [`examples/README.md`](examples/README.md) first.
 
 ## 9. Version compatibility
 
-`tello-go 0.2.x` implements Tello WS protocol `1.0` (`tello.ProtocolVersion`).
+`tello-go 0.3.x` implements Tello WS protocol `1.0` (`tello.ProtocolVersion`).
 
 `Connect` appends `?sdk=go&version=<tello.Version>&protocol=<tello.ProtocolVersion>`
 to the URL so the gateway can log which client connected. Your path and other query

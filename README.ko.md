@@ -10,7 +10,10 @@ Tello용 Go SDK. `tello.Client`는 WebSocket `/sdk` 프로토콜로 대화의 �
 
 > 저장소: `tello-go` · 모듈: `github.com/tello-ai/tello-go` · 패키지: `tello`
 >
-> webhook은 제공하지 않습니다. REST API의 통화 엔드포인트(`/v1/calls`: 생성·조회·
+> 이 SDK에는 webhook 기능이 없습니다. 통화 이벤트 webhook(`call.ringing`·
+> `call.started`·`call.transfer_started`·`call.ended`)은 포털의 웹훅 탭에서
+> 에이전트·크루마다 설정합니다(선택 인증 헤더 이름·값, 제한 시간, 추가 헤더 —
+> 서명 키는 없습니다). REST API의 통화 엔드포인트(`/v1/calls`: 생성·조회·
 > 목록·종료·전환)는 이 SDK에 들어 있지 않습니다.
 
 ## 1. 설치
@@ -360,7 +363,7 @@ go run ./examples/call-summary    # 게이트로 막아 둔 라이브 시나리�
 
 ## 9. 버전 호환성
 
-`tello-go 0.2.x`는 Tello WS 프로토콜 `1.0`을 구현합니다
+`tello-go 0.3.x`는 Tello WS 프로토콜 `1.0`을 구현합니다
 (`tello.ProtocolVersion`).
 
 `Connect`는 URL에 `?sdk=go&version=<tello.Version>&protocol=<tello.ProtocolVersion>`를
