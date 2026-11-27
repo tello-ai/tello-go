@@ -67,9 +67,9 @@ type CallProviderError struct{ TelloError }
 // status the API does not document for the method, or a body that is not a
 // JSON object, gets Code "invalid_response".
 //
-// Data is the envelope's data object (for example missingVariables or
-// reason), nil when absent. IdempotencyKey is the Idempotency-Key the
-// request sent, "" when it sent none; retry with the same key.
+// Data is the envelope's data object (for example reason or detail), nil
+// when absent. IdempotencyKey is the Idempotency-Key the request sent, ""
+// when it sent none; retry with the same key.
 type APIError struct {
 	TelloError
 	Status         int
